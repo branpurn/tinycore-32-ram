@@ -19,6 +19,10 @@ for m in $MEMS; do
     st=$?; [ $st -eq 0 ] || rc=1
     tail -1 "out/test-logs/console-m$m.txt" >> "$summary"
 done
+# Default boot path exactly as on real hardware: no keypress, no disk.
+python3 tests/harness.py --mem 32 --nokey | tee out/test-logs/console-m32-nokey.txt
+[ $? -eq 0 ] || rc=1
+tail -1 out/test-logs/console-m32-nokey.txt >> "$summary"
 for m in $SWEEP; do
     python3 tests/harness.py --mem "$m" --boot-timeout 120 | tee "out/test-logs/console-m$m.txt"
     tail -1 "out/test-logs/console-m$m.txt" | sed 's/$/  [headroom run, non-fatal]/' >> "$summary"

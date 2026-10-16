@@ -1,7 +1,10 @@
 # tc32 inittab (busybox init)
 ::sysinit:/etc/init.d/rcS
-# Shell on the kernel console (tty1 on real hardware, ttyS0 if console=ttyS0).
-::askfirst:-/bin/sh
+# Root shells on COM1 (9600 8N1) and the VGA console, respawned on exit.
+# tc32 is a single-user, run-from-RAM system: no passwords (getty -n +
+# /sbin/autologin). See /sbin/tc32-getty for the missing-port back-off.
+ttyS0::respawn:/sbin/tc32-getty ttyS0 9600 vt100 -L
+tty1::respawn:/sbin/tc32-getty tty1 38400 linux
 tty2::askfirst:-/bin/sh
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/etc/init.d/rc.shutdown

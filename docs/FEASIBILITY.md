@@ -6,7 +6,7 @@ written with `dd`.
 
 **Bottom line: the single-floppy target works.** A Linux 6.18 LTS kernel
 built for i486 plus a static musl busybox initramfs with trimmed Tiny Core–style
-init scripts fits on one floppy with about 170 KiB to spare. In QEMU
+init scripts fits on one floppy with about 167 KiB to spare. In QEMU
 (`-cpu 486`, TCG) it boots to a shell at 32 MB with about 24 MB free. Stock Tiny
 Core cannot run this way. Its `core.gz` alone is about 14 MB compressed, and
 the FAQ minimum is 46 MB. So tc32 keeps Tiny Core's *design* (boot codes,
@@ -99,8 +99,8 @@ rootfs, so TC's copy only doubles peak RAM.
 | 1.44 MB floppy | 1,474,560 | 1440 |
 | FAT12 metadata (boot sector, 2 FATs, root dir) + syslinux 4.07 `ldlinux.sys` + cfg | ~55,000 | ~54 |
 | `vmlinuz`: Linux 6.18.57, i486, xz (base + IDE/ext2 + squashfs/loop + APM) | 1,032,704 | 1008 |
-| `core.xz`: initramfs (busybox 1.37.0 static musl, 91 applets + scripts) | 212,236 | 207 |
-| **Free on the floppy FAT** (persistence, a `.tcz` or two) | **174,080** | **170** |
+| `core.xz`: initramfs (busybox 1.37.0 static musl, 92 applets incl. getty + scripts) | 214,500 | 209 |
+| **Free on the floppy FAT** (persistence, a `.tcz` or two) | **171,520** | **167** |
 
 Kernel cost per feature group (measured):
 * base (console, keyboard, serial, floppy, FAT, tmpfs, initrd): 905,728 B
@@ -127,16 +127,20 @@ code, 182K rwdata, 316K rodata, 200K init, 92K bss, 3644K reserved)`.
 
 | `-m` | MemTotal | used | free (after boot) | result |
 |---:|---:|---:|---:|---|
-| 32 | 29,140 kB | ~3.9 MB | **24,684 kB** | all 15 checks pass |
-| 24 | 21,012 kB | ~3.9 MB | 16,260 kB | all pass |
-| 16 | 12,896 kB | ~3.9 MB | 8,220 kB | all pass |
-| 12 | 8,832 kB | ~3.9 MB | 4,532 kB | all pass |
-| 10 | 6,788 kB | ~3.8 MB | 2,544 kB | boots; the 2 MB `/tmp` write fails (tmpfs is capped at 25% of RAM) |
-| 8 | 4,772 kB | ~3.2 MB | 1,140 kB | boots to a shell; OOM panic on the 2 MB write |
+| 32 | 29,140 kB | 4,036–4,348 kB | **24,324–24,672 kB** | all pass (19/19 with test disk; 15/15 default no-keypress boot) |
+| 24 | 21,012 kB | 4,376 kB | 16,168 kB | all pass |
+| 16 | 12,896 kB | 4,412 kB | 8,016 kB | all pass |
+| 12 | 8,832 kB | 3,976 kB | 4,388 kB | all pass |
+| 10 | 6,788 kB | 3,908 kB | 2,412 kB | boots; the 2 MB `/tmp` write fails (tmpfs is capped at 25% of RAM) |
+| 8 | 4,772 kB | n/a | n/a | the kernel boots, but early userland gets ENOSPC/ENOMEM on the RAM rootfs (`/dev` is not populated), so no shell |
 
 The 755C's 4 MB base RAM alone is not enough. Any 755C with a memory card
-(at least 8 MB total) boots tc32. At 32 MB, about 24 MB is left for
+(at least about 10–12 MB total) boots tc32 to a usable shell. At 32 MB, about 24 MB is left for
 applications, a RAM disk, or extensions.
+
+The serial console + getty change (Phase 1b) costs about 0.2–0.5 MB more
+"used" RAM after boot (4.0–4.3 MB vs 3.6–3.9 MB at 32 MB): two login shells + getty wrappers instead of one
+askfirst shell, plus the tty buffers.
 
 Two important kernel fixes came out of this testing:
 * `CONFIG_PHYSICAL_START=0x100000`. The default 16 MB load address makes
@@ -145,6 +149,20 @@ Two important kernel fixes came out of this testing:
 * `CONFIG_COMPAT_32BIT_TIME=y`. musl on i386 uses the legacy time
   syscalls. Without them busybox `init` busy-spins and ignores
   poweroff/reboot.
+
+## 4b. Console setup (Brandon's decision, Phase 1b)
+
+* The default syslinux entry autoboots after 3 s with
+  `console=tty0 console=ttyS0,9600n8`. ttyS0 is listed last, so it is
+  `/dev/console`. `SERIAL 0 9600` mirrors the boot prompt on COM1.
+* busybox init respawns an autologin root shell (`getty -n -l
+  /sbin/autologin`, busybox ash, no bash) on **ttyS0 and tty1**.
+  `/sbin/tc32-getty` backs off when a port is missing or fails
+  immediately, so a disabled COM1 cannot flood the console.
+* The `vga` label is the VGA-only, `quiet` fallback.
+* 9600 baud is the safe choice for a 1994 UART/BIOS/cable. It costs
+  about 5 s of synchronous printk for the ~5 KB boot log. 115200 is
+  untested on the 755C.
 
 ## 5. Risks
 
@@ -188,7 +206,7 @@ Two important kernel fixes came out of this testing:
 * **D4 – Networking.** None in phase 1. Options are PCMCIA (needs PCMCIA
   core + i82365 + a card driver, roughly 60–100 KiB, so likely a second
   floppy or the HDD) or a parallel-port PLIP link.
-* **D5 – Persistence.** Use the floppy's ~170 KiB free FAT space
+* **D5 – Persistence.** Use the floppy's ~167 KiB free FAT space
   (`tce=fd0`), or the HDD?
 * **D6 – Audio, PCMCIA, suspend.** Out of scope unless you want them.
 
@@ -203,7 +221,7 @@ Fallback layouts, if feature creep pushes past 1.44 MB:
 ## 7. Next steps
 
 1. Boot the floppy on the real 755C. Capture any panic with a phone
-   photo, or over COM1 with the `serial` boot label.
+   photo, or capture the COM1 log, which is on by default (see README, "Serial console").
 2. Decide D1–D5.
 3. Patch out the perf events properly (about 60–70 KiB of floppy space).
 4. Try the HDD path on hardware (`tce=hda1`, swap partition).

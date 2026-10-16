@@ -77,15 +77,17 @@ def main():
     ap.add_argument("--machine", default="isapc")
     ap.add_argument("--logdir", default=os.path.join(TOP, "out/test-logs"))
     ap.add_argument("--boot-timeout", type=int, default=300)
+    ap.add_argument("--nokey", action="store_true",
+                    help="do not type at the boot prompt (tests default auto-boot); no IDE disk")
     a = ap.parse_args()
     os.makedirs(a.logdir, exist_ok=True)
-    name = f"m{a.mem}"
+    name = f"m{a.mem}" + ("-nokey" if a.nokey else "")
     logpath = os.path.join(a.logdir, f"serial-{name}.log")
     cmd = ["qemu-system-i386", "-accel", "tcg", "-M", a.machine, "-cpu", "486",
            "-m", str(a.mem), "-drive", f"if=floppy,index=0,format=raw,file={a.img},readonly=on",
            "-boot", "a", "-display", "none", "-serial", "stdio", "-monitor", "none",
            "-no-reboot"]
-    have_disk = os.path.exists(a.disk)
+    have_disk = os.path.exists(a.disk) and not a.nokey
     if have_disk:
         cmd += ["-drive", f"if=ide,index=0,format=raw,file={a.disk},snapshot=on"]
     results = []
@@ -100,28 +102,51 @@ def main():
     metrics = {"mem": a.mem}
     try:
         g.expect(r"boot: ", 60)
-        check("syslinux prompt", True)
-        bootcodes = "serial" + (" tce=sda1" if have_disk else "")
-        g.send(bootcodes + "\r", slow=True)
+        check("syslinux prompt on COM1", True)
+        if a.nokey:
+            # Default entry, no keypress: must auto-boot after TIMEOUT.
+            bootdesc = "default entry, no keypress"
+        else:
+            # Default label + extra boot codes (same kernel cmdline + tce=).
+            g.send("tc32" + (" tce=sda1" if have_disk else "") + "\r", slow=True)
+            bootdesc = "typed 'tc32" + (" tce=sda1" if have_disk else "") + "'"
         t_boot = time.time()
         try:
-            out, _ = g.expect(r"Please press Enter to activate this console", a.boot_timeout)
+            out, _ = g.expect(r"tc32: ready\.", a.boot_timeout)
         except (TimeoutError, EOFError) as e:
             tail = g.buf.decode("latin-1")[-600:]
-            check("kernel boots to init/askfirst", False, str(e))
+            check("kernel boots to rcS on serial console", False, str(e))
             print(tail)
             return finish(results, metrics, a, name)
         metrics["boot_s"] = round(time.time() - t_boot, 1)
-        check("kernel boots to init/askfirst", True, f"{metrics['boot_s']} s from boot prompt")
+        check("kernel boots to rcS on serial console", True, f"{bootdesc}; {metrics['boot_s']} s after boot prompt")
+        check("kernel log on serial (console=ttyS0)", "Linux version" in out)
         m = re.search(r"Memory: (\d+)K/(\d+)K available \((\d+)K kernel code, (\d+)K rwdata, (\d+)K rodata, (\d+)K init, (\d+)K bss, (\d+)K reserved", out)
         if m:
             metrics["dmesg_memory"] = m.group(0)
-        g.send("\r")
-        g.expect(r"# ", 30)
-        check("shell prompt", True)
+        g.expect(r"root@box:[^\n#]*# ", 60)
+        check("getty autologin root shell on ttyS0", True)
         g.run("stty -echo 2>/dev/null; export PS1='# '", 20)
         g.expect(r"# ", 10)
 
+        o, rc = g.run("cat /proc/consoles")
+        check("/proc/consoles: tty0 + ttyS0 (ttyS0 = /dev/console)",
+              re.search(r"^ttyS0 .*C", o, re.M) and re.search(r"^tty0 ", o, re.M), " | ".join(l.split()[0] for l in o.strip().splitlines()))
+        fdmap = "for p in /proc/[0-9]*; do t=$(readlink $p/fd/0 2>/dev/null) && echo ${p#/proc/} $t; done"
+        o, rc = g.run(fdmap)
+        ttys = {}
+        for line in o.split("\n"):
+            f = line.split()
+            if len(f) == 2 and f[1] in ("/dev/ttyS0", "/dev/tty1"):
+                ttys.setdefault(f[1], []).append(f[0])
+        check("login shells on both ttyS0 and tty1", "/dev/ttyS0" in ttys and "/dev/tty1" in ttys,
+              ", ".join(f"{k}: pid {' '.join(v)}" for k, v in sorted(ttys.items())))
+        if "/dev/tty1" in ttys:
+            old = set(ttys["/dev/tty1"])
+            g.run("kill -9 " + " ".join(old) + "; sleep 3")
+            o, rc = g.run(fdmap)
+            new = {l.split()[0] for l in o.split("\n") if l.endswith(" /dev/tty1")}
+            check("tty1 shell respawned by init", bool(new) and not (new & old), f"old {sorted(old)} -> new {sorted(new)}")
         o, rc = g.run("uname -m")
         check("uname -m is i486", rc == 0 and o.strip() == "i486", o.strip())
         metrics["uname"] = g.run("uname -sr")[0].strip()
@@ -184,7 +209,7 @@ def finish(results, metrics, a, name):
     metrics["results"] = [{"check": d, "pass": p, "detail": x} for d, p, x in results]
     with open(os.path.join(a.logdir, f"result-{name}.json"), "w") as f:
         json.dump(metrics, f, indent=2)
-    print(f"== -m {a.mem}: {'PASS' if ok else 'FAIL'} "
+    print(f"== -m {a.mem}{' (nokey)' if a.nokey else ''}: {'PASS' if ok else 'FAIL'} "
           f"({sum(r[1] for r in results)}/{len(results)} checks)"
           + (f", free {metrics.get('free_kb')} kB of {metrics.get('total_kb')} kB" if 'free_kb' in metrics else ""))
     return 0 if ok else 1
