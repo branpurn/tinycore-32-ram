@@ -1,0 +1,10 @@
+# downloads, build trees and artifacts are never committed
+/dl/
+/build/
+/out/
+/ref/
+*.part
+*.img
+*.iso
+__pycache__/
+/dl.log
