@@ -1,0 +1,6 @@
+#!/bin/sh
+# Invoked by getty -n as the "login" program: start a root login shell.
+HOME=/root USER=root LOGNAME=root SHELL=/bin/sh TERM=${TERM:-vt100}
+export HOME USER LOGNAME SHELL TERM
+cd "$HOME" 2>/dev/null
+exec /bin/sh -l

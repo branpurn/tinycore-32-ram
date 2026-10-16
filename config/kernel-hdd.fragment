@@ -1,0 +1,16 @@
+# Optional: IDE hard disk (755C internal 2.5" IDE on ISA ports 0x1f0/0x3f6)
+# via libata pata_legacy, plus ext2 for a scatter/HDD root and swap.
+CONFIG_SCSI=y
+CONFIG_BLK_DEV_SD=y
+CONFIG_ATA=y
+CONFIG_ATA_SFF=y
+CONFIG_PATA_LEGACY=y
+CONFIG_MSDOS_PARTITION=y
+CONFIG_PARTITION_ADVANCED=y
+CONFIG_EXT2_FS=y
+# CONFIG_ATA_VERBOSE_ERROR is not set
+# CONFIG_ATA_FORCE is not set
+# CONFIG_ATA_BMDMA is not set
+# CONFIG_BLK_DEV_BSG is not set
+# CONFIG_SCSI_LOWLEVEL is not set
+# CONFIG_SCSI_PROC_FS is not set

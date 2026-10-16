@@ -1,0 +1,11 @@
+#!/bin/sh
+# tc32-getty TTY BAUD TERM [getty options]
+# Autologin root shell on TTY via busybox getty. If the port is missing or
+# unusable (e.g. COM1 disabled in the BIOS / no UART), back off instead of
+# letting init respawn it in a tight loop that floods the console.
+tty=$1 baud=$2 term=$3; shift 3
+if [ ! -c "/dev/$tty" ]; then sleep 60; exit 1; fi
+t0=$(date +%s)
+/sbin/getty -n -l /sbin/autologin "$@" "$baud" "$tty" "$term"
+[ $(( $(date +%s) - t0 )) -lt 5 ] && sleep 30
+exit 0

@@ -1,0 +1,24 @@
+#!/bin/sh
+# tc32 tce-load: minimal, local-only subset of Tiny Core's tce-load.
+#   tce-load -i /path/to/ext.tcz | ext   mount (squashfs over loop) and link into /
+# No download (-w), no dependency (.dep) resolution yet.
+# NOTE: stock TC .tcz binaries are linked against glibc; tc32 userland is
+# static musl busybox, so only static or script-only extensions work as-is.
+die() { echo "tce-load: $*" >&2; exit 1; }
+[ "$1" = "-i" ] || die "usage: tce-load -i ext.tcz"
+shift
+TCEDIR=$(readlink /etc/sysconfig/tcedir 2>/dev/null || echo /tmp/tce)
+for e in "$@"; do
+    case $e in */*) f=$e ;; *) f=$TCEDIR/optional/${e%.tcz}.tcz ;; esac
+    [ -f "$f" ] || die "not found: $f"
+    n=$(basename "$f" .tcz)
+    [ -e "/usr/local/tce.installed/$n" ] && { echo "$n is already installed"; continue; }
+    mkdir -p "/tmp/tcloop/$n"
+    mount -t squashfs -o loop,ro "$f" "/tmp/tcloop/$n" || die "mount failed: $f"
+    # Symlink every file into the root filesystem (TC does the same via cp -s).
+    ( cd "/tmp/tcloop/$n" && find . -type d | while read -r d; do mkdir -p "/$d"; done \
+      && find . ! -type d | while read -r x; do ln -sf "/tmp/tcloop/$n/${x#./}" "/${x#./}"; done )
+    touch "/usr/local/tce.installed/$n"
+    [ -x "/usr/local/tce.installed/$n.sh" ] && "/usr/local/tce.installed/$n.sh"
+    echo "$n: OK"
+done

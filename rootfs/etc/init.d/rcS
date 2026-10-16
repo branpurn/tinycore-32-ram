@@ -1,0 +1,52 @@
+#!/bin/sh
+# tc32 rcS: a heavily trimmed take on Tiny Core's /etc/init.d/tc-config.
+# Supported boot codes (same names as TC where they overlap):
+#   tce=fd0|hda1|sda1...  mount device, use <dev>/tce as extension dir
+#   noswap                do not auto-enable swap partitions
+#   norestore             (accepted, no-op for now)
+#   host=NAME             hostname (default: box)
+#   quiet                 less console chatter
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+mkdir -p /dev/pts /tmp /mnt /run /var/run /var/log /tmp/tce/optional /tmp/tcloop /usr/local/tce.installed
+chmod 1777 /tmp
+mount -t tmpfs -o size=25% tmpfs /tmp 2>/dev/null || true
+hostname box
+
+TCE="" NOSWAP="" QUIET=""
+for c in $(cat /proc/cmdline); do
+    case $c in
+        tce=*) TCE=${c#tce=} ;;
+        noswap) NOSWAP=1 ;;
+        host=*) hostname "${c#host=}" ;;
+        quiet) QUIET=1 ;;
+    esac
+done
+say() { [ -n "$QUIET" ] || echo "$@"; }
+
+say "tc32: $(uname -r) $(uname -m), $(awk '/MemTotal/{print $2" kB"}' /proc/meminfo) RAM"
+
+# Swap: enable any partition with type 82 (Linux swap). Important at 32 MB.
+if [ -z "$NOSWAP" ] && [ -e /proc/partitions ]; then
+    for d in $(awk 'NR>2 && $4 !~ /[0-9]$/ {print $4}' /proc/partitions); do
+        fdisk -l "/dev/$d" 2>/dev/null | awk '/^\/dev\// && NF > 3 && ($NF == "swap" || $(NF-2) == "82") {print $1}'
+    done | while read -r p; do swapon "$p" 2>/dev/null && say "tc32: swap on $p"; done
+fi
+
+# Extension dir (TC layout: /etc/sysconfig/tcedir -> <mount>/tce)
+TCEDIR=/tmp/tce
+if [ -n "$TCE" ]; then
+    dev=${TCE%%/*}; dev=${dev#/dev/}
+    mkdir -p "/mnt/$dev"
+    if mount "/dev/$dev" "/mnt/$dev" 2>/dev/null; then
+        mkdir -p "/mnt/$dev/tce/optional" 2>/dev/null
+        TCEDIR=/mnt/$dev/tce
+    else
+        say "tc32: could not mount /dev/$dev for tce="
+    fi
+fi
+ln -sfn "$TCEDIR" /etc/sysconfig/tcedir
+if [ -f "$TCEDIR/onboot.lst" ]; then
+    while read -r e; do [ -n "$e" ] && tce-load -i "$TCEDIR/optional/$e"; done < "$TCEDIR/onboot.lst"
+fi
+[ -x /opt/bootlocal.sh ] && /opt/bootlocal.sh
+say "tc32: ready."
