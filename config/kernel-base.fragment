@@ -1,0 +1,102 @@
+# tc32 kernel: applied on top of `make ARCH=i386 tinyconfig`.
+# Target: IBM ThinkPad 755C (i486DX4, no PCI, ISA/VLB, 32 MB RAM).
+
+# --- CPU / memory --------------------------------------------------------
+CONFIG_M486=y
+# CONFIG_X86_GENERIC is not set
+# CONFIG_SMP is not set
+# CONFIG_HIGHMEM4G is not set
+# CONFIG_RELOCATABLE is not set
+# Load the kernel at 1 MB instead of the default 16 MB, otherwise machines
+# with < ~19 MB RAM cannot boot at all (silent hang after the bootloader).
+CONFIG_PHYSICAL_START=0x100000
+CONFIG_PHYSICAL_ALIGN=0x100000
+# CONFIG_PCI is not set
+CONFIG_ISA=y
+CONFIG_SLUB_TINY=y
+CONFIG_CC_OPTIMIZE_FOR_SIZE=y
+CONFIG_SWAP=y
+CONFIG_SHMEM=y
+# Size/RAM trims (the 486 has no microcode loader, PMU, MCE, or speculative-
+# execution bugs worth mitigating; dmesg ring kept at 4 KB).
+# (MICROCODE and PERF_EVENTS are force-selected by arch/x86; perf is ~200 KB
+#  of text, see docs/FEASIBILITY.md "size opportunities")
+# CONFIG_X86_MCE is not set
+# CONFIG_CPU_MITIGATIONS is not set
+CONFIG_PROCESSOR_SELECT=y
+CONFIG_CPU_SUP_INTEL=y
+# CONFIG_CPU_SUP_AMD is not set
+# CONFIG_CPU_SUP_HYGON is not set
+# CONFIG_CPU_SUP_CENTAUR is not set
+# CONFIG_CPU_SUP_TRANSMETA_32 is not set
+# CONFIG_CPU_SUP_UMC_32 is not set
+# CONFIG_CPU_SUP_ZHAOXIN is not set
+# CONFIG_CPU_SUP_CYRIX_32 is not set
+# CONFIG_CPU_SUP_VORTEX_32 is not set
+CONFIG_LOG_BUF_SHIFT=12
+# CONFIG_HID_SUPPORT is not set
+# CONFIG_INPUT_MOUSE is not set
+# CONFIG_INPUT_MOUSEDEV is not set
+# CONFIG_SERIO_SERPORT is not set
+
+# --- Kernel + initramfs compression ------------------------------------
+CONFIG_KERNEL_XZ=y
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_XZ=y
+# CONFIG_RD_GZIP is not set
+# CONFIG_RD_BZIP2 is not set
+# CONFIG_RD_LZMA is not set
+# CONFIG_RD_LZO is not set
+# CONFIG_RD_LZ4 is not set
+# CONFIG_RD_ZSTD is not set
+
+# --- Userspace ABI --------------------------------------------------------
+CONFIG_PRINTK=y
+CONFIG_MULTIUSER=y
+CONFIG_FUTEX=y
+CONFIG_POSIX_TIMERS=y
+# musl on i386 uses the legacy 32-bit-time syscalls whenever the value fits
+# (nanosleep, rt_sigtimedwait, ...); without this busybox init spins and
+# ignores poweroff/reboot signals.
+CONFIG_COMPAT_32BIT_TIME=y
+CONFIG_BINFMT_ELF=y
+CONFIG_BINFMT_SCRIPT=y
+
+# --- Pseudo filesystems ----------------------------------------------------
+CONFIG_PROC_FS=y
+CONFIG_SYSFS=y
+CONFIG_TMPFS=y
+CONFIG_DEVTMPFS=y
+CONFIG_DEVTMPFS_MOUNT=y
+
+# --- Console: VGA text + AT keyboard; 8250 serial for headless debugging ---
+CONFIG_TTY=y
+CONFIG_VT=y
+CONFIG_VT_CONSOLE=y
+CONFIG_VGA_CONSOLE=y
+CONFIG_INPUT=y
+CONFIG_INPUT_KEYBOARD=y
+CONFIG_KEYBOARD_ATKBD=y
+CONFIG_SERIO=y
+CONFIG_SERIO_I8042=y
+CONFIG_SERIAL_8250=y
+CONFIG_SERIAL_8250_CONSOLE=y
+CONFIG_SERIAL_8250_NR_UARTS=2
+CONFIG_SERIAL_8250_RUNTIME_UARTS=2
+
+# --- Block: floppy + FAT (persistence on the boot floppy) -----------------
+CONFIG_BLOCK=y
+CONFIG_BLK_DEV=y
+CONFIG_BLK_DEV_FD=y
+CONFIG_VFAT_FS=y
+CONFIG_FAT_DEFAULT_CODEPAGE=437
+CONFIG_FAT_DEFAULT_IOCHARSET="ascii"
+CONFIG_NLS=y
+CONFIG_NLS_CODEPAGE_437=y
+CONFIG_NLS_ASCII=y
+
+# --- Power: APM BIOS (the 755C has APM, no ACPI) for real power-off --------
+CONFIG_SUSPEND=y
+CONFIG_PM_SLEEP=y
+CONFIG_APM=y
+CONFIG_APM_DO_ENABLE=y

@@ -1,0 +1,9 @@
+#!/bin/sh
+# tc32 /init -- derived in spirit from Tiny Core's /init, but simplified:
+# the initramfs is already unpacked into tmpfs-backed rootfs by the kernel,
+# so (unlike TC) we do NOT copy the whole root into a second tmpfs. That
+# copy roughly doubles peak RAM use and is one reason stock TC needs ~46 MB.
+/bin/busybox mount -t proc proc /proc
+/bin/busybox mount -t sysfs sysfs /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null
+exec /sbin/init

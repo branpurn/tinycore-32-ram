@@ -1,0 +1,7 @@
+# tc32 inittab (busybox init)
+::sysinit:/etc/init.d/rcS
+# Shell on the kernel console (tty1 on real hardware, ttyS0 if console=ttyS0).
+::askfirst:-/bin/sh
+tty2::askfirst:-/bin/sh
+::ctrlaltdel:/sbin/reboot
+::shutdown:/etc/init.d/rc.shutdown
