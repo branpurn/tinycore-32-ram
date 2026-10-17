@@ -2,6 +2,10 @@
 # tc32 tce-load: minimal, local-only subset of Tiny Core's tce-load.
 #   tce-load -i /path/to/ext.tcz | ext   mount (squashfs over loop) and link into /
 # No download (-w), no dependency (.dep) resolution yet.
+# Install script, as in Tiny Core: an executable
+# /usr/local/tce.installed/<name> shipped inside the extension is run after
+# linking. Fallback (older tc32 extensions): /usr/local/tce.installed/<name>.sh.
+# Extensions without a script get an empty marker file, like TC.
 # NOTE: stock TC .tcz binaries are linked against glibc; tc32 userland is
 # static musl busybox, so only static or script-only extensions work as-is.
 die() { echo "tce-load: $*" >&2; exit 1; }
@@ -18,7 +22,12 @@ for e in "$@"; do
     # Symlink every file into the root filesystem (TC does the same via cp -s).
     ( cd "/tmp/tcloop/$n" && find . -type d | while read -r d; do mkdir -p "/$d"; done \
       && find . ! -type d | while read -r x; do ln -sf "/tmp/tcloop/$n/${x#./}" "/${x#./}"; done )
-    touch "/usr/local/tce.installed/$n"
-    [ -x "/usr/local/tce.installed/$n.sh" ] && "/usr/local/tce.installed/$n.sh"
+    m=/usr/local/tce.installed/$n
+    if [ -e "$m" ]; then
+        [ -x "$m" ] && "$m"
+    else
+        touch "$m"
+        [ -x "$m.sh" ] && "$m.sh"
+    fi
     echo "$n: OK"
 done

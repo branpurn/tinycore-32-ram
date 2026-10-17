@@ -8,7 +8,12 @@ PATH=$PATH:/usr/sbin:/sbin
 T="$BUILD/test-disk"; rm -rf "$T"; mkdir -p "$T/ext" "$T/hello/usr/local/bin" "$T/hellogz/usr/local/bin"
 printf '#!/bin/sh\necho hello from tcz\n' > "$T/hello/usr/local/bin/hello-tcz"
 printf '#!/bin/sh\necho hello from gz tcz\n' > "$T/hellogz/usr/local/bin/hellogz-tcz"
-chmod 755 "$T"/hello*/usr/local/bin/*
+# Install scripts: hello uses the Tiny Core convention
+# (usr/local/tce.installed/<name>), hellogz the older tc32 <name>.sh fallback.
+mkdir -p "$T/hello/usr/local/tce.installed" "$T/hellogz/usr/local/tce.installed"
+printf '#!/bin/sh\necho tc > /tmp/hello.installed\n' > "$T/hello/usr/local/tce.installed/hello"
+printf '#!/bin/sh\necho sh > /tmp/hellogz.installed\n' > "$T/hellogz/usr/local/tce.installed/hellogz.sh"
+chmod 755 "$T"/hello*/usr/local/bin/* "$T"/hello*/usr/local/tce.installed/*
 mkdir -p "$T/ext/tce/optional"
 mksquashfs "$T/hello"   "$T/ext/tce/optional/hello.tcz"   -comp xz   -noappend -all-root -quiet >/dev/null
 mksquashfs "$T/hellogz" "$T/ext/tce/optional/hellogz.tcz" -comp gzip -noappend -all-root -quiet >/dev/null

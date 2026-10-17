@@ -8,7 +8,10 @@ codes, a `tce` directory, `.tcz` squashfs extensions, `onboot.lst` and
 
 * Linux **6.18 LTS** (the last LTS line with i486 support), `tinyconfig` +
   i486 + VGA/serial console, AT keyboard, floppy, FAT, IDE (`pata_legacy`),
-  ext2, swap, loop + squashfs, APM. xz-compressed.
+  ext2, swap, loop + squashfs, APM, loadable modules (drivers ship as
+  `.tcz`, see [thinkpad-755c-drivers](https://github.com/branpurn/thinkpad-755c-drivers)).
+  Boots with `floppy=thinkpad` (the 755C inverts the floppy disk-change
+  line); use the `generic` boot label on other PCs. xz-compressed.
 * **busybox 1.37** built statically against musl for `-march=i486`.
 * syslinux **4.07** on FAT12.
 
@@ -19,9 +22,9 @@ decision points.
 
 | | size |
 |---|---:|
-| kernel (`vmlinuz`) | ~1008 KiB |
+| kernel (`vmlinuz`, with loadable module support) | ~1060 KiB |
 | initramfs (`core.xz`) | ~209 KiB |
-| free space left on the floppy | ~167 KiB |
+| free space left on the floppy | ~115 KiB |
 | RAM free after boot at 32 MB | ~24 MB |
 
 ## Build
@@ -98,9 +101,13 @@ in `rootfs/etc/inittab`.
 ## Testing
 
 `tests/run.sh` (or `make test`) runs two 32 MB boots. The first types
-`tc32 tce=sda1` at the prompt with the IDE test disk attached (19 checks).
-The second is a no-keypress, no-disk run of the default entry, exactly as
-on first real boot (15 checks). Both use
+`tc32 floppy=0,thinkpad tce=sda1` at the prompt with the IDE test disk
+attached (23 checks). The second is a no-keypress, no-disk run of the
+default entry, exactly as on first real boot (16 checks). QEMU's floppy
+controller has a normal disk-change line, so the typed run undoes the
+755C's `floppy=thinkpad`; the default-entry run checks that the option is
+on the command line and skips the `/dev/fd0` mount, which needs the real
+755C. Both use
 `qemu-system-i386 -accel tcg -M isapc -cpu 486 -m 32`. KVM can't present a
 486 to the guest, so tests always use TCG. A stdlib-only Python harness
 (`tests/harness.py`, no pexpect needed) drives the syslinux prompt and the

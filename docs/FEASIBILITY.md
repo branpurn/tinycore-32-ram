@@ -98,15 +98,21 @@ rootfs, so TC's copy only doubles peak RAM.
 |---|---:|---:|
 | 1.44 MB floppy | 1,474,560 | 1440 |
 | FAT12 metadata (boot sector, 2 FATs, root dir) + syslinux 4.07 `ldlinux.sys` + cfg | ~55,000 | ~54 |
-| `vmlinuz`: Linux 6.18.57, i486, xz (base + IDE/ext2 + squashfs/loop + APM) | 1,032,704 | 1008 |
-| `core.xz`: initramfs (busybox 1.37.0 static musl, 92 applets incl. getty + scripts) | 214,500 | 209 |
-| **Free on the floppy FAT** (persistence, a `.tcz` or two) | **171,520** | **167** |
+| `vmlinuz`: Linux 6.18.57, i486, xz (base + IDE/ext2 + squashfs/loop + APM + loadable modules) | 1,085,952 | 1060 |
+| `core.xz`: initramfs (busybox 1.37.0 static musl, 92 applets incl. getty + scripts) | 214,624 | 209 |
+| **Free on the floppy FAT** (persistence, a `.tcz` or two) | **117,760** | **115** |
 
 Kernel cost per feature group (measured):
 * base (console, keyboard, serial, floppy, FAT, tmpfs, initrd): 905,728 B
 * + IDE (libata `pata_legacy`, SCSI disk) + ext2: +90 KiB
 * + `.tcz` support (loop + squashfs zlib/xz): +16 KiB
 * + APM (real power-off; needs `SUSPEND`/`PM_SLEEP`): +20 KiB
+* + loadable modules (`MODULES`, `MODULE_UNLOAD`, all exports kept): +52 KiB.
+  With `TRIM_UNUSED_KSYMS` it is ~20 KiB, but then only modules built
+  against that exact symbol list load; the stock kernel keeps every export.
+  Drivers ship as `.tcz` from
+  [thinkpad-755c-drivers](https://github.com/branpurn/thinkpad-755c-drivers);
+  module tools come from its `modutils.tcz` (not in the core busybox).
 
 Size opportunities, not taken yet:
 1. **perf events** (about 200 KB of uncompressed text, about 60–70 KB on

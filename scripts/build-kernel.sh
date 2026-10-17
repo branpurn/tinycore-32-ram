@@ -1,8 +1,8 @@
 #!/bin/sh
 # Build an i486 bzImage from tinyconfig + config/kernel-*.fragment.
-# Usage: build-kernel.sh [fragment-name ...]   (default: base hdd)
+# Usage: build-kernel.sh [fragment-name ...]   (default: base hdd tce modules)
 . "$(dirname "$0")/common.sh"
-FRAGS=${*:-${KERNEL_FRAGMENTS:-base hdd tce}}
+FRAGS=${*:-${KERNEL_FRAGMENTS:-base hdd tce modules}}
 tb=$(fetch "$LINUX_URL" "$LINUX_SHA256"); unpack "$tb" "linux-$LINUX_VER"
 K="$BUILD/linux-$LINUX_VER"
 KO="$BUILD/kernel-obj"

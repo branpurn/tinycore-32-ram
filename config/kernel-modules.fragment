@@ -1,0 +1,14 @@
+# Loadable module support (on by default). Drivers that do not belong on
+# the floppy (framebuffer, sound, PC Card, mouse, ...) ship as .ko files in
+# .tcz extensions, see https://github.com/branpurn/thinkpad-755c-drivers.
+# Module tools are not in the core busybox; load modutils.tcz first.
+# TRIM_UNUSED_KSYMS is deliberately off here: the stock kernel must keep
+# every export so that modules built against any config sharing this
+# vermagic ("6.18.57 mod_unload 486") can resolve their symbols.
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
+# CONFIG_MODVERSIONS is not set
+# CONFIG_MODULE_SIG is not set
+# CONFIG_MODULE_COMPRESS is not set
+# CONFIG_MODULE_FORCE_LOAD is not set
+# CONFIG_TRIM_UNUSED_KSYMS is not set
