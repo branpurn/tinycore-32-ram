@@ -5,7 +5,7 @@
 #        make run        interactive QEMU (VGA window)    make run-serial (terminal)
 .POSIX:
 SHELL = /bin/sh
-KERNEL_FRAGMENTS ?= base hdd tce
+KERNEL_FRAGMENTS ?= base hdd tce modules
 export KERNEL_FRAGMENTS
 
 all: image

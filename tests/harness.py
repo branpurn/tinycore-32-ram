@@ -108,8 +108,12 @@ def main():
             bootdesc = "default entry, no keypress"
         else:
             # Default label + extra boot codes (same kernel cmdline + tce=).
-            g.send("tc32" + (" tce=sda1" if have_disk else "") + "\r", slow=True)
-            bootdesc = "typed 'tc32" + (" tce=sda1" if have_disk else "") + "'"
+            # QEMU's FDC has a normal (non-inverted) disk-change line, so undo
+            # the ThinkPad default (floppy=thinkpad) for the typed runs; later
+            # options on the command line win (floppy=0,thinkpad clears it).
+            codes = " floppy=0,thinkpad" + (" tce=sda1" if have_disk else "")
+            g.send("tc32" + codes + "\r", slow=True)
+            bootdesc = "typed 'tc32" + codes + "'"
         t_boot = time.time()
         try:
             out, _ = g.expect(r"tc32: ready\.", a.boot_timeout)
@@ -150,6 +154,8 @@ def main():
         o, rc = g.run("uname -m")
         check("uname -m is i486", rc == 0 and o.strip() == "i486", o.strip())
         metrics["uname"] = g.run("uname -sr")[0].strip()
+        o, rc = g.run("cat /proc/cmdline")
+        check("boot line has floppy=thinkpad (755C disk-change line)", "floppy=thinkpad" in o, o.strip())
 
         o, rc = g.run("free")
         mm = re.search(r"Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)", o)
@@ -171,7 +177,14 @@ def main():
         check("write 2 MB to RAM fs", rc == 0 and "2097152" in o, o.strip())
 
         o, rc = g.run("mkdir -p /mnt/fd0 && mount -t vfat -o ro /dev/fd0 /mnt/fd0 && ls /mnt/fd0; umount /mnt/fd0", 120)
-        check("floppy driver + FAT mount (boot floppy)", rc == 0 and "vmlinuz" in o, " ".join(o.split()))
+        if a.nokey:
+            # Default ThinkPad entry: floppy=thinkpad inverts the disk-change
+            # line, which QEMU's FDC does not do, so fd0 reads fail here by
+            # design. Covered by the typed runs (floppy=0,thinkpad).
+            check("floppy: default entry keeps floppy=thinkpad (fd0 mount not expected under QEMU)",
+                  "floppy=thinkpad" in g.run("cat /proc/cmdline")[0], "inverted DCL; real 755C only")
+        else:
+            check("floppy driver + FAT mount (boot floppy)", rc == 0 and "vmlinuz" in o, " ".join(o.split()))
 
         if have_disk:
             o, rc = g.run("readlink /etc/sysconfig/tcedir; ls /usr/local/tce.installed")
@@ -182,6 +195,12 @@ def main():
             check("tce extension auto-loaded from onboot.lst (squashfs/xz)", rc == 0 and "hello from tcz" in o, o.strip())
             o, rc = g.run("tce-load -i /mnt/sda1/tce/optional/hellogz.tcz && hellogz-tcz")
             check("tce-load -i (squashfs/gzip, TC default)", rc == 0 and "hello from gz tcz" in o, " ".join(o.split()))
+            o, rc = g.run("cat /tmp/hello.installed /tmp/hellogz.installed")
+            check("install scripts: TC-style tce.installed/<name> and <name>.sh fallback", o.split() == ["tc", "sh"], " ".join(o.split()))
+            o, rc = g.run("tce-load -i /mnt/sda1/tce/optional/hellogz.tcz")
+            check("tce-load refuses a second install", "already installed" in o, o.strip())
+            o, rc = g.run("cat /proc/modules >/dev/null && echo modules-ok")
+            check("kernel has loadable module support (/proc/modules)", rc == 0 and "modules-ok" in o)
             o, rc = g.run("free | awk '/Mem:/{print $3, $4}'")
             metrics["after_tce_used_free_kb"] = o.strip()
 
