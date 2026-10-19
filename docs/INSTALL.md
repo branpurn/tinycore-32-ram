@@ -159,6 +159,67 @@ transfer reaches about 55–70 KB/s, faster than any real line. QEMU's UART
 doesn't pace data at the configured baud, so that figure shows the
 protocol and helper working, not real-hardware speed.
 
+## Keyboard on the 755C (`atkbd.xlate=2`)
+
+**Symptom** (floppies built before this fix): the system boots to the
+prompt, but the built-in keyboard types nothing and every key logs
+
+```
+input: AT Raw Set 2 keyboard as /devices/platform/i8042/serio0/input/input0
+atkbd serio0: Unknown key pressed (raw set 2, code 0x17 on isa0060/serio0).
+atkbd serio0: Unknown key pressed (raw set 2, code 0x117 on isa0060/serio0).
+```
+
+**Cause.** At boot, i8042 reads the controller's command byte (CTR). If
+bit 6 (XLATE, set 2 -> set 1 translation) is clear, the driver assumes the
+BIOS chose untranslated mode, forces `i8042_direct`, and registers a raw
+port (`SERIO_8042`). atkbd then decodes **raw set 2**. The 755C's controller
+reports XLATE as clear but still delivers **set-1** codes: `0x17` is the
+make code of `I` in set 1, and `0x117` is its break code `0x97` after atkbd's
+raw-set-2 remapping (`0x80` becomes `0x100`). Set-2 tables don't know these
+codes, so no key works. (The BIOS and the syslinux `boot:` prompt read
+set 1 through INT 9/INT 16h, so they work.)
+
+Stock 6.18 has **no boot parameter** that makes a raw port decode as
+translated. The `i8042.*` options either force raw mode (`direct`), stop
+writes (`dumbkbd`), or tune probing (`nopnp`, `noloop`, `nomux`, `reset`).
+`atkbd.set=3`/`atkbd.reset` only help a keyboard that really talks set 1
+over an untranslated link. **`atkbd.xlate`** fixes this. It is a small tc32
+kernel patch (`patches/linux/0001-atkbd-xlate-raw-port-that-translates.patch`)
+that changes decoding only and never writes the CTR:
+
+| `atkbd.xlate=` | raw i8042 port is decoded as |
+|---|---|
+| `0` | raw set 2 (upstream behaviour) |
+| `1` (default) | translated, if the keyboard ID came back translated (`0xab41`/`0xab54`, which a raw link can't produce); otherwise raw set 2 |
+| `2` | always translated |
+
+The ThinkPad labels (`tc32`, `vga`, `install`, `rescue`, `notce` and the
+disk's `tc32`/`vga`/`notce`) boot with **`atkbd.xlate=2`**. On a
+translating controller (QEMU, almost every PC) it does nothing. `generic`
+leaves the auto default. With the fix, dmesg shows
+`atkbd serio0: raw i8042 port, decoding as translated (atkbd.xlate=2)` and
+`AT Translated Set 2 keyboard`.
+
+**Older floppies (no patch).** Use the COM1 console for input: it is a
+full root shell (`picocom -b 9600 /dev/ttyUSB0`), and the installer works
+from it. To check whether the keyboard really talks set 1 over a raw link,
+interrupt the 3 s countdown (press a key, e.g. Space, as soon as `boot:`
+appears) and type `install atkbd.reset=1` (or `install atkbd.set=3`).
+These parameters can't fix a controller that keeps translating.
+
+**What to collect** if the keyboard still misbehaves (over COM1):
+`cat /proc/cmdline /sys/class/input/input0/name /sys/class/input/input0/id/version; dmesg | grep -iE 'i8042|atkbd'`.
+The ID tells the cases apart: `ab41`/`ab54` = the controller translates,
+`ab83`/`ab84` = untranslated link. If even `atkbd.xlate=2` types garbage,
+boot with `atkbd.xlate=0 atkbd.reset=1`.
+
+**QEMU coverage.** QEMU's i8042 honours XLATE, so it cannot reproduce the
+755C. `make test` checks that the keyboard works through `sendkey` on the
+normal translated path. It also checks it on a genuinely raw port
+(`i8042.direct=1`, `generic`: auto mode leaves the raw keyboard alone),
+and that `atkbd.xlate=2` switches a raw port to translated decoding.
+
 ## Real-hardware checklist (755C)
 
 1. **BIOS setup** (Easy-Setup / F1 at power-on): serial port **enabled**
@@ -171,15 +232,21 @@ protocol and helper working, not real-hardware speed.
    host, `picocom -b 9600 /dev/ttyUSB0` (user in group `dialout`). Expect
    the syslinux banner + `boot:` (on COM1 at 9600), the kernel log, and
    then the `root@box:~#` prompt plus the installer banner.
-3. Boot the installer floppy, `install-to-disk -n /dev/sda`, and check
+3. **Keyboard:** at the installer's root shell on the VGA screen, type
+   `echo ok` on the built-in keyboard. Over COM1, `dmesg | grep atkbd`
+   should show `decoding as translated (atkbd.xlate=2)` and
+   `AT Translated Set 2 keyboard`, with no `Unknown key` lines. If not,
+   see [Keyboard on the 755C](#keyboard-on-the-755c-atkbdxlate2) and send
+   the listed output. The serial console works either way.
+4. Boot the installer floppy, `install-to-disk -n /dev/sda`, and check
    the model and size (a "2 GB" card is about 1907 MiB). Then run
    `install-to-disk /dev/sda` and type `YES`.
-4. Remove the floppy and `reboot`. On picocom you should see the extlinux
+5. Remove the floppy and `reboot`. On picocom you should see the extlinux
    `SAY` line `tc32 (disk): boots in 3 s ...` and `boot:`, then the same
    kernel log and a shell. Check that `cat /proc/swaps` shows `sda2` and
    `readlink /etc/sysconfig/tcedir` shows `/mnt/sda1/tce`.
-5. If the disk does not boot: check the BIOS boot order and that the
+6. If the disk does not boot: check the BIOS boot order and that the
    adapter/card is set as **master**. As a fallback, boot the floppy's
    `rescue` label with `tce=sda1` to reach the installed files.
-6. Transfer test: send a small file at 9600 first, then at 115200
+7. Transfer test: send a small file at 9600 first, then at 115200
    (`tools/send-file.sh -b 9600 ...`, then the default).

@@ -5,9 +5,13 @@ Boots out/tc32.img in qemu-system-i386 with TCG and `-cpu 486` (KVM cannot
 present a 486 to the guest), drives the syslinux prompt and the shell over
 the emulated COM1, runs assertions and writes logs under out/test-logs/.
 """
-import argparse, os, re, select, subprocess, sys, time
+import argparse, os, re, select, socket, subprocess, sys, time
 
 TOP = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class Done(Exception):
+    """End of the checks for this run: power off."""
 
 
 class Guest:
@@ -68,6 +72,63 @@ class Guest:
         self.log.close()
 
 
+# QEMU qcodes for the characters the keyboard check types (US layout).
+QCODE = {" ": "spc", "-": "minus", "/": "slash", ".": "dot", ">": "shift-dot", "\n": "ret"}
+
+
+def sendkeys(sock_path, text):
+    """Type TEXT on the guest's PS/2 keyboard via the QEMU monitor (sendkey),
+    i.e. through the emulated i8042 + atkbd, not the serial line."""
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(sock_path)
+    s.settimeout(2)
+    try:
+        s.recv(4096)                      # monitor banner
+    except socket.timeout:
+        pass
+    for ch in text:
+        if ch in QCODE:
+            k = QCODE[ch]
+        elif ch.isupper():
+            k = "shift-" + ch.lower()
+        else:
+            k = ch
+        s.sendall(f"sendkey {k}\n".encode())
+        time.sleep(0.15)                  # TCG 486 is slow; keep the PS/2 queue short
+        try:
+            s.recv(4096)
+        except socket.timeout:
+            pass
+    s.close()
+
+
+def kbd_checks(g, check, mon, expect):
+    """PS/2 keyboard: driver mode + typed input reaching the tty1 shell.
+    expect: 'translated' (normal i8042), 'raw' (i8042.direct=1, raw set 2),
+    'forced' (raw port + atkbd.xlate=2: decoded as translated, no typing)."""
+    o, rc = g.run("cat /sys/class/input/input0/name /sys/class/input/input0/id/version; "
+                  "dmesg | grep -iE 'atkbd|i8042' | tail -4")
+    name = o.strip().splitlines()[0] if o.strip() else ""
+    want = "AT Raw Set 2 keyboard" if expect == "raw" else "AT Translated Set 2 keyboard"
+    check(f"keyboard: atkbd reports '{want}'", name == want, " | ".join(o.strip().splitlines()))
+    if expect == "forced":
+        check("keyboard: atkbd.xlate=2 decodes the raw port as translated",
+              "decoding as translated (atkbd.xlate=2)" in o)
+        return
+    if expect == "raw":
+        check("keyboard: auto mode leaves a genuine raw set-2 keyboard alone (ID 0xab83)",
+              "decoding as translated" not in o and "ab83" in o)
+    o, rc = g.run("dmesg | grep -c 'Unknown key'")
+    unknown0 = int((o.split() or ["0"])[-1])
+    g.run("rm -f /tmp/kbd")
+    # Shift, a doubled letter (catches lost break codes) and a digit.
+    sendkeys(mon, "echo Kbd-mapp00l >/tmp/kbd\n")
+    o, rc = g.run("sleep 3; cat /tmp/kbd; dmesg | grep -c 'Unknown key'", 30)
+    lines = o.strip().splitlines()
+    check("keyboard: text typed with QEMU sendkey reaches the tty1 shell",
+          bool(lines) and lines[0] == "Kbd-mapp00l" and lines[-1] == str(unknown0), " | ".join(lines))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mem", type=int, default=32)
@@ -79,15 +140,21 @@ def main():
     ap.add_argument("--boot-timeout", type=int, default=300)
     ap.add_argument("--nokey", action="store_true",
                     help="do not type at the boot prompt (tests default auto-boot); no IDE disk")
+    ap.add_argument("--kbd", choices=["raw", "forced"],
+                    help="short keyboard-only run with a non-translating i8042 (i8042.direct=1): "
+                         "raw = 'generic' label (auto xlate), forced = 'tc32' label (atkbd.xlate=2)")
     a = ap.parse_args()
     os.makedirs(a.logdir, exist_ok=True)
-    name = f"m{a.mem}" + ("-nokey" if a.nokey else "")
+    name = f"m{a.mem}" + ("-nokey" if a.nokey else "") + (f"-kbd-{a.kbd}" if a.kbd else "")
+    mon = os.path.join(a.logdir, f"monitor-{name}.sock")
+    if os.path.exists(mon):
+        os.unlink(mon)
     logpath = os.path.join(a.logdir, f"serial-{name}.log")
     cmd = ["qemu-system-i386", "-accel", "tcg", "-M", a.machine, "-cpu", "486",
            "-m", str(a.mem), "-drive", f"if=floppy,index=0,format=raw,file={a.img},readonly=on",
-           "-boot", "a", "-display", "none", "-serial", "stdio", "-monitor", "none",
+           "-boot", "a", "-display", "none", "-serial", "stdio", "-monitor", f"unix:{mon},server=on,wait=off",
            "-no-reboot"]
-    have_disk = os.path.exists(a.disk) and not a.nokey
+    have_disk = os.path.exists(a.disk) and not a.nokey and not a.kbd
     if have_disk:
         cmd += ["-drive", f"if=ide,index=0,format=raw,file={a.disk},snapshot=on"]
     results = []
@@ -103,7 +170,11 @@ def main():
     try:
         g.expect(r"boot: ", 60)
         check("syslinux prompt on COM1", True)
-        if a.nokey:
+        if a.kbd:
+            codes = ("generic" if a.kbd == "raw" else "tc32 floppy=0,thinkpad") + " i8042.direct=1"
+            g.send(codes + "\r", slow=True)
+            bootdesc = f"typed '{codes}'"
+        elif a.nokey:
             # Default entry, no keypress: must auto-boot after TIMEOUT.
             bootdesc = "default entry, no keypress"
         else:
@@ -130,9 +201,14 @@ def main():
             metrics["dmesg_memory"] = m.group(0)
         g.expect(r"root@box:[^\n#]*# ", 60)
         check("getty autologin root shell on ttyS0", True)
-        g.run("stty -echo 2>/dev/null; export PS1='# '", 20)
+        # Kernel messages (e.g. "random: crng init done") must not land in
+        # command output: the kernel log on COM1 was checked above.
+        g.run("stty -echo 2>/dev/null; dmesg -n 1; export PS1='# '", 20)
         g.expect(r"# ", 10)
 
+        if a.kbd:
+            kbd_checks(g, check, mon, a.kbd)
+            raise Done
         o, rc = g.run("cat /proc/consoles")
         check("/proc/consoles: tty0 + ttyS0 (ttyS0 = /dev/console)",
               re.search(r"^ttyS0 .*C", o, re.M) and re.search(r"^tty0 ", o, re.M), " | ".join(l.split()[0] for l in o.strip().splitlines()))
@@ -156,6 +232,8 @@ def main():
         metrics["uname"] = g.run("uname -sr")[0].strip()
         o, rc = g.run("cat /proc/cmdline")
         check("boot line has floppy=thinkpad (755C disk-change line)", "floppy=thinkpad" in o, o.strip())
+        check("boot line has atkbd.xlate=2 (755C keyboard controller)", "atkbd.xlate=2" in o)
+        kbd_checks(g, check, mon, "translated")
 
         o, rc = g.run("free")
         mm = re.search(r"Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)", o)
@@ -207,6 +285,8 @@ def main():
         o, rc = g.run("busybox | head -1")
         metrics["busybox"] = o.strip()
 
+        raise Done
+    except Done:
         g.send("poweroff\r")
         try:
             o, _ = g.expect(r"(reboot: Power down|reboot: System halted|System halted|Power down)", 90)
@@ -218,6 +298,8 @@ def main():
         print(g.buf.decode("latin-1")[-600:])
     finally:
         g.close()
+        if os.path.exists(mon):
+            os.unlink(mon)
     return finish(results, metrics, a, name)
 
 
@@ -228,7 +310,7 @@ def finish(results, metrics, a, name):
     metrics["results"] = [{"check": d, "pass": p, "detail": x} for d, p, x in results]
     with open(os.path.join(a.logdir, f"result-{name}.json"), "w") as f:
         json.dump(metrics, f, indent=2)
-    print(f"== -m {a.mem}{' (nokey)' if a.nokey else ''}: {'PASS' if ok else 'FAIL'} "
+    print(f"== -m {a.mem}{' (nokey)' if a.nokey else ''}{f' (kbd {a.kbd})' if a.kbd else ''}: {'PASS' if ok else 'FAIL'} "
           f"({sum(r[1] for r in results)}/{len(results)} checks)"
           + (f", free {metrics.get('free_kb')} kB of {metrics.get('total_kb')} kB" if 'free_kb' in metrics else ""))
     return 0 if ok else 1

@@ -152,6 +152,7 @@ def main():
         g.run("stty -echo 2>/dev/null; export PS1='# '", 20); g.expect(r"# ", 10)
         o, rc = g.run("cat /proc/cmdline; cat /proc/swaps | wc -l")
         check("installer: noswap, no swap enabled on the target", "noswap" in o and o.split()[-1] == "1", o.split()[-1])
+        check("installer: cmdline has atkbd.xlate=2 (755C keyboard)", "atkbd.xlate=2" in o)
         o, rc = g.run("cat /sys/block/sda/size; cat /sys/block/sda/device/model")
         check("pata_legacy sees the disk as /dev/sda, 3906250 sectors", o.split()[0] == "3906250", " ".join(o.split()))
         o, rc = g.run("ls /sys/bus/platform/drivers/ 2>/dev/null | grep -i pata; dmesg | grep -iE 'pata_legacy|ata1' | head -3")
@@ -211,7 +212,8 @@ def main():
         shell(g)
         check("disk: autologin root shell on ttyS0", True)
         o, rc = g.run("cat /proc/cmdline")
-        check("disk: cmdline = serial console + tce=sda1", "console=ttyS0,9600n8" in o and "tce=sda1" in o, o.strip())
+        check("disk: cmdline = serial console + tce=sda1 + atkbd.xlate=2", "console=ttyS0,9600n8" in o and "tce=sda1" in o
+              and "atkbd.xlate=2" in o, o.strip())
         o, rc = g.run("readlink /etc/sysconfig/tcedir; cat /mnt/sda1/tce/marker; grep sda1 /proc/mounts")
         check("disk: /mnt/sda1/tce is the extension dir (ext2), data kept", "/mnt/sda1/tce" in o and "keep-me" in o
               and "ext2" in o, " ".join(o.split()))
