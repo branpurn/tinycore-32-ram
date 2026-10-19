@@ -1,14 +1,17 @@
 # tc32 -- Tiny Core-derived single-floppy Linux for i486 / 32 MB
-# Usage: make            build out/tc32.img
-#        make test       boot it in QEMU (TCG, -cpu 486, -m 32) and assert basics
+# Usage: make            build out/tc32.img (rescue) + out/installer.img
+#        make test       boot the rescue floppy in QEMU (TCG, -cpu 486, -m 32) and assert basics
 #        make sweep      test + headroom runs at 24/16/12/10/8 MB
+#        make installer  build out/installer.img (install-to-disk onto the IDE disk)
+#        make test-install  install onto a 2 GB IDE disk in QEMU, boot it without
+#                        the floppy, XMODEM transfer over the console + checksum
 #        make run        interactive QEMU (VGA window)    make run-serial (terminal)
 .POSIX:
 SHELL = /bin/sh
 KERNEL_FRAGMENTS ?= base hdd tce modules
 export KERNEL_FRAGMENTS
 
-all: image
+all: image installer
 
 tools:
 	scripts/host-tools.sh
@@ -29,17 +32,36 @@ image: rootfs check
 	scripts/mkfloppy.sh
 	@scripts/sizes.sh
 
+extlinux: tools
+	scripts/build-extlinux.sh
+
+installer: image extlinux
+	scripts/check-i486.sh out/extlinux
+	scripts/mkinstaller.sh
+	@scripts/sizes.sh
+
 test: image
 	tests/run.sh 32
 
 sweep: image
 	TC32_SWEEP=1 tests/run.sh 32
 
+test-install: installer
+	tests/run-install.sh
+
 run:
 	qemu-system-i386 -accel tcg -M isapc -cpu 486 -m 32 -drive if=floppy,format=raw,file=out/tc32.img -boot a
 
 run-serial:
 	qemu-system-i386 -accel tcg -M isapc -cpu 486 -m 32 -drive if=floppy,format=raw,file=out/tc32.img -boot a -nographic
+
+# Interactive installer with a scratch 2 GB disk (out/hd-2g.img, created if missing).
+run-installer:
+	[ -f out/hd-2g.img ] || truncate -s 2000000000 out/hd-2g.img
+	qemu-system-i386 -accel tcg -M isapc -cpu 486 -m 32 -drive if=floppy,format=raw,file=out/installer.img -drive if=ide,format=raw,file=out/hd-2g.img -boot a -nographic
+
+run-disk:
+	qemu-system-i386 -accel tcg -M isapc -cpu 486 -m 32 -drive if=ide,format=raw,file=out/hd-2g.img -boot c -nographic
 
 scan:
 	scripts/scan-public.sh
@@ -49,9 +71,9 @@ docker:
 	docker run --rm -v "$$PWD":/src -w /src -u "$$(id -u):$$(id -g)" tc32-build make image
 
 clean:
-	rm -rf out build/kernel-obj build/rootfs-stage build/floppy-stage build/test-disk build/core.cpio build/rootfs.list
+	rm -rf out build/kernel-obj build/rootfs-stage build/floppy-stage build/test-disk build/core.cpio build/rootfs.list build/installer-stage build/installer-floppy build/install.cpio build/install.list
 
 distclean:
 	rm -rf out build
 
-.PHONY: all tools kernel busybox rootfs check image test sweep run run-serial scan docker clean distclean
+.PHONY: all tools kernel busybox rootfs check image extlinux installer test sweep test-install run run-serial run-installer run-disk scan docker clean distclean

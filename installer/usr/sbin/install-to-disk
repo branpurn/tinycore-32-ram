@@ -1,0 +1,171 @@
+#!/bin/sh
+# install-to-disk: install tc32 from the installer floppy onto an IDE disk
+# (e.g. the 755C's CompactFlash-on-IDE card). busybox ash; see docs/INSTALL.md.
+#
+#   install-to-disk [-s MB] [-w MB] [-S DIR] [-u] [-n] DISK
+#     DISK    whole disk, e.g. /dev/sda (libata pata_legacy names IDE disks sdX)
+#     -s MB   boot/extension partition size (default 256)
+#     -w MB   swap partition size, 0 = no swap partition (default 64)
+#     -S DIR  take vmlinuz + core.xz from DIR (default: the boot floppy, /dev/fd0)
+#     -u      update: keep partitions and data, refresh kernel, core.xz, bootloader
+#     -n      dry run: print the plan, change nothing
+#
+# Layout (MBR, 512-byte sectors, 1 MiB aligned, all inside the first 504 MiB
+# so even a BIOS limited to 1024 cylinders x 16 heads x 63 sectors can boot):
+#   sector 0          syslinux mbr.bin + partition table
+#   p1  2048..        ext2 "TC32", bootable: /boot/{vmlinuz,core.xz,extlinux/}, /tce
+#   p2  after p1      Linux swap (type 82, auto-enabled by rcS)
+#   rest              left unpartitioned for a future second stage
+# Running it again gives the same layout (full mode) or only refreshes the
+# boot files (-u). Nothing is written before you type YES.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
+SHARE=/usr/share/tc32
+P1MB=256 SWAPMB=64 SRC="" UPDATE="" DRY=""
+MNT=/mnt/tc32-target
+die() { echo "install-to-disk: $*" >&2; exit 1; }
+usage() { sed -n '5,12s/^# \{0,1\}//p' "$0"; exit 2; }
+while getopts s:w:S:unh o; do
+    case $o in
+        s) P1MB=$OPTARG ;; w) SWAPMB=$OPTARG ;; S) SRC=$OPTARG ;;
+        u) UPDATE=1 ;; n) DRY=1 ;; *) usage ;;
+    esac
+done
+shift $((OPTIND - 1))
+[ $# -eq 1 ] || usage
+DISK=$1; d=${DISK#/dev/}; DISK=/dev/$d
+case $P1MB$SWAPMB in *[!0-9]*) die "sizes must be whole MB" ;; esac
+[ "$P1MB" -ge 16 ] || die "-s: at least 16 MB"
+[ "$(id -u)" = 0 ] || die "must run as root"
+[ -b "$DISK" ] || die "$DISK: not a block device"
+[ -d "/sys/block/$d" ] || die "$DISK: not a whole disk (give /dev/sda, not /dev/sda1)"
+case $d in fd*|loop*|ram*) die "$DISK: not a hard disk" ;; esac
+case $d in *[0-9]) P=${d}p ;; *) P=$d ;; esac        # sda -> sda1, mmcblk0 -> mmcblk0p1
+P1=/dev/${P}1 P2=/dev/${P}2
+
+SECTORS=$(cat "/sys/block/$d/size")
+MODEL=$(cat "/sys/block/$d/device/model" 2>/dev/null | sed 's/ *$//')
+DISKMB=$((SECTORS / 2048))
+S1=2048 N1=$((P1MB * 2048))
+S2=$((S1 + N1)) N2=$((SWAPMB * 2048))
+END=$((S2 + N2))
+[ "$END" -le "$SECTORS" ] || die "$DISK has $DISKMB MB; layout needs $((END / 2048 + 1)) MB (use -s/-w)"
+CHSLIM=1032192                                       # 1024*16*63 sectors = 504 MiB
+
+# --- source files: the boot floppy (or -S DIR) ---------------------------
+STAGE=/tmp/tc32-install
+rm -rf "$STAGE"; mkdir -p "$STAGE"
+if [ -z "$SRC" ]; then
+    SRC=/mnt/fd0
+    mkdir -p "$SRC"
+    grep -q " $SRC " /proc/mounts || mount -t vfat -o ro /dev/fd0 "$SRC" 2>/dev/null \
+        || die "cannot mount the floppy (/dev/fd0). On a non-ThinkPad, boot the 'generic' label; or use -S DIR"
+fi
+for f in vmlinuz core.xz; do [ -f "$SRC/$f" ] || die "$SRC/$f not found"; done
+echo "Reading vmlinuz and core.xz from $SRC ..."
+cp "$SRC/vmlinuz" "$SRC/core.xz" "$STAGE/" || die "read error on $SRC"
+if [ -f "$SRC/sha256.txt" ]; then
+    ( cd "$STAGE" && grep -E ' (vmlinuz|core\.xz)$' "$SRC/sha256.txt" | sha256sum -c -s ) \
+        || die "checksum mismatch: the floppy is damaged (compare $SRC/sha256.txt)"
+    echo "  checksums OK ($SRC/sha256.txt)"
+fi
+sed "s|@TCEDEV@|${P}1|g" "$SHARE/extlinux.conf" > "$STAGE/extlinux.conf" || die "missing $SHARE/extlinux.conf"
+command -v extlinux >/dev/null || die "extlinux not found (boot the installer floppy)"
+[ -s "$SHARE/mbr.bin" ] && [ "$(wc -c < "$SHARE/mbr.bin")" -eq 440 ] || die "missing $SHARE/mbr.bin"
+
+# --- plan + confirmation --------------------------------------------------
+echo
+echo "Target: $DISK  ${MODEL:-unknown model}  $DISKMB MB ($SECTORS sectors)"
+echo "Current partition table:"
+fdisk -l "$DISK" 2>/dev/null | sed -n '/^\/dev\//p;/^Device/p' | sed 's/^/  /'
+if [ -n "$UPDATE" ]; then
+    echo "Mode: UPDATE. Keep partitions and /tce; replace /boot/vmlinuz, /boot/core.xz,"
+    echo "      extlinux.conf, extlinux (ldlinux.sys) and the MBR boot code on $P1."
+else
+    echo "Mode: FULL INSTALL. New layout:"
+    echo "  ${P}1  $P1MB MB  ext2 'TC32', bootable (kernel, core.xz, extlinux, /tce)"
+    [ "$N2" -gt 0 ] && echo "  ${P}2  $SWAPMB MB  Linux swap"
+    echo "  free  $(( (SECTORS - END) / 2048 )) MB left unpartitioned (future second stage)"
+    [ "$END" -gt "$CHSLIM" ] && echo "  WARNING: ends past 504 MB; a BIOS without LBA/translation may not boot it"
+fi
+[ -n "$DRY" ] && { echo "Dry run (-n): nothing written."; exit 0; }
+echo
+if [ -n "$UPDATE" ]; then
+    echo "This rewrites the boot files on $P1 and the MBR boot code of $DISK."
+else
+    echo "*** ALL DATA ON $DISK WILL BE DESTROYED (Windows 95, every partition). ***"
+fi
+printf 'Type YES (capitals) to continue, anything else aborts: '
+read -r ans || ans=""
+[ "$ans" = YES ] || { echo "Aborted; nothing was written."; exit 1; }
+
+# --- release the disk (rcS may have enabled swap / mounted tce=) ---------
+for p in $(awk -v d="$P" '$4 ~ "^"d"[0-9]+$" {print $4}' /proc/partitions); do
+    swapoff "/dev/$p" 2>/dev/null
+    awk -v p="/dev/$p" '$1 == p {print $2}' /proc/mounts | while read -r m; do umount "$m" || umount -l "$m"; done
+done
+grep -q "^/dev/${P}[0-9]* " /proc/mounts && die "a partition of $DISK is still mounted"
+mkdir -p "$MNT"; umount "$MNT" 2>/dev/null
+
+# le32 N: 4 little-endian bytes; chs LBA: 3 CHS bytes (16 heads, 63 sectors)
+oct() { for b; do printf "\\$(printf %03o "$b")"; done; }
+le32() { oct $(($1 & 255)) $(($1 >> 8 & 255)) $(($1 >> 16 & 255)) $(($1 >> 24 & 255)); }
+chs() {
+    c=$(($1 / 1008)) h=$(($1 / 63 % 16)) s=$(($1 % 63 + 1))
+    if [ "$c" -gt 1023 ]; then oct 254 255 255; else oct "$h" $((s | (c >> 2 & 192))) $((c & 255)); fi
+}
+part() { # boot type start count
+    oct "$1"; chs "$3"; oct "$2"; chs $(($3 + $4 - 1)); le32 "$3"; le32 "$4"
+}
+newmbr() { # writes 512 bytes: mbr.bin, disk id 0x7c320486, table, 55 AA
+    cat "$SHARE/mbr.bin"; oct 134 4 50 124 0 0
+    part 128 131 "$S1" "$N1"
+    if [ "$N2" -gt 0 ]; then part 0 130 "$S2" "$N2"; else dd if=/dev/zero bs=16 count=1 2>/dev/null; fi
+    dd if=/dev/zero bs=32 count=1 2>/dev/null; oct 85 170
+}
+zero() { dd if=/dev/zero of="$DISK" bs=512 seek="$1" count="$2" 2>/dev/null || die "write error on $DISK"; }
+
+if [ -z "$UPDATE" ]; then
+    echo "Partitioning $DISK ..."
+    zero 0 2048                                       # old MBR, boot track, Win95 loaders
+    zero "$S1" 2048                                   # old filesystem signatures in p1
+    [ "$N2" -gt 0 ] && zero "$S2" 64
+    newmbr > "$STAGE/mbr.img"
+    [ "$(wc -c < "$STAGE/mbr.img")" -eq 512 ] || die "internal error: MBR is not 512 bytes"
+    dd if="$STAGE/mbr.img" of="$DISK" bs=512 count=1 2>/dev/null || die "cannot write the MBR"
+    sync; blockdev --rereadpt "$DISK" || die "kernel did not re-read the partition table"
+    i=0; while [ ! -b "$P1" ] && [ $i -lt 10 ]; do sleep 1; i=$((i + 1)); done
+    [ -b "$P1" ] || die "$P1 did not appear"
+    echo "Making ext2 on $P1 (this takes a minute on a 486) ..."
+    mke2fs -F -L TC32 -m 1 "$P1" >/dev/null || die "mke2fs failed"
+    if [ "$N2" -gt 0 ]; then mkswap "$P2" >/dev/null || die "mkswap failed"; fi
+fi
+
+mount -t ext2 "$P1" "$MNT" || die "cannot mount $P1 (ext2)${UPDATE:+; -u needs an existing tc32 disk}"
+if [ -n "$UPDATE" ]; then
+    [ -d "$MNT/boot/extlinux" ] || { umount "$MNT"; die "-u: $P1 is not a tc32 disk; run a full install"; }
+    # New MBR boot code, existing disk id + partition table kept.
+    dd if="$DISK" of="$STAGE/old.mbr" bs=512 count=1 2>/dev/null || die "cannot read the MBR"
+    { cat "$SHARE/mbr.bin"; dd if="$STAGE/old.mbr" bs=1 skip=440 count=72 2>/dev/null; } > "$STAGE/mbr.img"
+    [ "$(wc -c < "$STAGE/mbr.img")" -eq 512 ] || die "internal error: MBR is not 512 bytes"
+    dd if="$STAGE/mbr.img" of="$DISK" bs=512 count=1 2>/dev/null || die "cannot write the MBR"
+fi
+echo "Copying kernel and core.xz to $P1 ..."
+mkdir -p "$MNT/boot/extlinux" "$MNT/tce/optional" || die "mkdir failed"
+[ -f "$MNT/tce/onboot.lst" ] || : > "$MNT/tce/onboot.lst"
+for f in vmlinuz core.xz; do
+    cp "$STAGE/$f" "$MNT/boot/$f.new" && mv "$MNT/boot/$f.new" "$MNT/boot/$f" || die "copy $f failed"
+done
+cp "$STAGE/extlinux.conf" "$MNT/boot/extlinux/extlinux.conf" || die "copy extlinux.conf failed"
+( cd "$STAGE" && sha256sum vmlinuz core.xz ) > "$MNT/boot/sha256.txt"
+echo "Installing extlinux on $P1 ..."
+extlinux --install "$MNT/boot/extlinux" >/dev/null || die "extlinux failed"
+sync; umount "$MNT" || die "umount failed"
+# Verify from disk: remount (umount dropped the cached pages) and checksum.
+mount -t ext2 -o ro "$P1" "$MNT" || die "cannot remount $P1"
+( cd "$MNT/boot" && sha256sum -c -s sha256.txt ); ok=$?
+[ -f "$MNT/boot/extlinux/ldlinux.sys" ] || ok=1
+umount "$MNT"; sync
+[ $ok -eq 0 ] || die "verification FAILED: files on $P1 do not match"
+[ "$(dd if="$DISK" bs=1 skip=510 count=2 2>/dev/null | hexdump -e '2/1 "%02x"')" = 55aa ] || die "MBR signature missing"
+echo "Verified: kernel and core.xz on $P1 match; MBR + extlinux installed."
+echo "tc32 is installed on $DISK. Remove the floppy and type: reboot"

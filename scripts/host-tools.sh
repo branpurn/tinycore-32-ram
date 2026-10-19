@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build missing host tools into build/host (no root required):
 #   flex, bison  (kernel kconfig/build), mtools (FAT image without loop mounts),
-#   syslinux 4.07 mtools-based installer, musl i486 cross toolchain.
+#   syslinux 4.07 mtools-based installer, lrzsz (sx), musl i486 cross toolchain.
 . "$(dirname "$0")/common.sh"
 mkdir -p "$HOSTTOOLS/bin"
 
@@ -39,6 +39,16 @@ if ! need mksquashfs; then
     ( cd "$BUILD/squashfs-tools-$SQUASHFS_VER/squashfs-tools" && \
       make -j"$JOBS" GZIP_SUPPORT=1 XZ_SUPPORT=1 LZO_SUPPORT=0 LZ4_SUPPORT=0 ZSTD_SUPPORT=0 LZMA_XZ_SUPPORT=0 XATTR_SUPPORT=0 mksquashfs >/dev/null \
       && cp mksquashfs "$HOSTTOOLS/bin/" ) || die "mksquashfs build failed"
+fi
+
+# sx (XMODEM send, lrzsz) for tools/send-file.sh and `make test-install`.
+# 1998-era C: build as gnu89 and quiet the warnings modern gcc emits.
+if ! need sx && ! need lsx; then
+    tb=$(fetch "$LRZSZ_URL" "$LRZSZ_SHA256"); unpack "$tb" "lrzsz-$LRZSZ_VER"
+    log "building host lrzsz $LRZSZ_VER (sx)"
+    ( cd "$BUILD/lrzsz-$LRZSZ_VER" && CFLAGS="-O2 -std=gnu89 -w" ./configure --prefix="$HOSTTOOLS" \
+        --disable-nls --program-transform-name=s/^l// >/dev/null && make -j"$JOBS" >/dev/null \
+        && make install >/dev/null ) || die "lrzsz build failed"
 fi
 
 # musl cross toolchain (i486)

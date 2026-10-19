@@ -15,33 +15,42 @@ codes, a `tce` directory, `.tcz` squashfs extensions, `onboot.lst` and
 * **busybox 1.37** built statically against musl for `-march=i486`.
 * syslinux **4.07** on FAT12.
 
-Status: **Phase 1**. Boots to a shell in QEMU (`-cpu 486`) from 10 MB up, and
-passes every automated check at 12–32 MB. Not yet tried on real hardware.
+Status: **Phase 1** plus a **disk installer**. Boots to a shell in QEMU
+(`-cpu 486`) from 10 MB up, and passes every automated check at 12–32 MB.
+The installer floppy installs tc32 onto the IDE disk (the 755C's
+CompactFlash card) so it boots without the floppy. Files can be sent over
+the COM1 serial link (XMODEM). See [docs/INSTALL.md](docs/INSTALL.md). Not
+yet tried on real hardware.
 See [docs/FEASIBILITY.md](docs/FEASIBILITY.md) for research, budgets and
 decision points.
 
 | | size |
 |---|---:|
 | kernel (`vmlinuz`, with loadable module support) | ~1060 KiB |
-| initramfs (`core.xz`) | ~209 KiB |
-| free space left on the floppy | ~115 KiB |
+| initramfs (`core.xz`) | ~213 KiB |
+| free space left on the floppy | ~112 KiB (114,688 bytes) |
+| installer floppy: + `install.xz` overlay / free | ~69 KiB / ~42 KiB |
 | RAM free after boot at 32 MB | ~24 MB |
 
 ## Build
 
 ```sh
-make            # -> out/tc32.img (1,474,560 bytes)
+make            # -> out/tc32.img (rescue) + out/installer.img, 1,474,560 bytes each
 make test       # QEMU boot test at 32 MB, logs in out/test-logs/
 make sweep      # + headroom runs at 24/16/12/10/8 MB
+make installer  # just out/installer.img (same kernel + core.xz, + install.xz)
+make test-install  # QEMU: install onto a 2 GB IDE disk, boot it with no floppy,
+                   #       XMODEM transfer over COM1 + sha256 check
+make run-installer # interactive installer + scratch disk; `make run-disk` boots that disk
 make run        # interactive QEMU (VGA window); `make run-serial` = COM1 in this terminal
 make scan       # public-repo hygiene scan (run before pushing)
 ```
 
 Host requirements: Linux x86_64 with `gcc`, `make`, `perl`, `python3`,
 `curl`, `xz`, `cpio`, `mkfs.fat`, and `qemu-system-i386` for tests (plus
-`mke2fs`/`sfdisk`/`mkswap` for the test disk). Missing `m4`, `flex`, `bison`,
-`mtools` and `mksquashfs` are built locally under `build/host/`, so no root
-is needed. The i486 musl cross toolchain comes from musl.cc, pinned by
+`mke2fs`/`sfdisk`/`mkswap` for the test disks). Missing `m4`, `flex`, `bison`,
+`mtools`, `mksquashfs` and `sx` (lrzsz) are built locally under `build/host/`,
+so no root is needed. The i486 musl cross toolchain comes from musl.cc, pinned by
 sha256. Alternatively, `make docker` builds inside `docker/Dockerfile`.
 
 All sources are pinned with sha256 in [`versions.env`](versions.env). Builds
@@ -66,8 +75,9 @@ console.
 At the `boot:` prompt (optional):
 * `Enter` or wait 3 s: default (VGA + COM1)
 * `vga`: VGA-only kernel console, `quiet` (a COM1 shell is still started)
-* `tc32 tce=hda1`: default entry plus boot codes. Use `/dev/hda1`…`sda1` as
-  the extension/persistence dir (`tce=fd0` for the floppy itself)
+* `tc32 tce=sda1`: default entry plus boot codes. Use that partition as
+  the extension/persistence dir. IDE disks are `sdX` under libata
+  `pata_legacy`; use `tce=fd0` for the floppy itself.
 * other codes: `noswap`, `host=NAME`, `quiet`
 
 ### Serial console: connecting to the 755C
@@ -98,6 +108,24 @@ UART is a 16550A, but it is not verified. To try it, change both
 `SERIAL 0 9600` and `ttyS0,9600n8` in `boot/syslinux.cfg` and the `9600`
 in `rootfs/etc/inittab`.
 
+## Install onto the IDE disk / CF card
+
+```sh
+dd if=out/installer.img of=/dev/fdX bs=512 conv=fsync    # boot it, then on the 755C:
+install-to-disk -n /dev/sda      # dry run
+install-to-disk /dev/sda         # type YES; then remove the floppy and reboot
+```
+
+This wipes the disk (e.g. Windows 95) and creates `sda1`, 256 MiB ext2,
+bootable: kernel, `core.xz`, extlinux 4.07 and `/tce`. It adds `sda2`,
+64 MiB swap, and leaves the rest unpartitioned for a future second stage.
+The disk boots with the same 9600 COM1 + VGA console and `tce=sda1`. Re-running
+is safe, and `-u` refreshes only the boot files. To send files over the
+serial console, use `tools/send-file.sh FILE /dev/ttyUSB0 [REMOTE]` (XMODEM
+via busybox `rx`, temporarily at 115200, sha256-verified). Details,
+layout rationale, throughput and a real-hardware checklist are in
+[docs/INSTALL.md](docs/INSTALL.md).
+
 ## Testing
 
 `tests/run.sh` (or `make test`) runs two 32 MB boots. The first types
@@ -121,6 +149,16 @@ auto-detection, `.tcz` auto-load from `onboot.lst` (xz) and `tce-load -i`
 (gzip), and an APM power-off. You get a pass/fail summary in
 `out/test-logs/summary.txt`, plus serial logs and JSON results.
 
+`tests/run-install.sh` (`make test-install`, 28 checks) builds a
+2,000,000,000-byte IDE disk with a FAT32 "Windows 95" partition and boots
+the installer. It runs `install-to-disk` over COM1 four ways: a dry run, a
+refused confirmation, a full install, and a second full install that must
+give an identical MBR. Then `-u` must keep `/tce`. Next it boots the disk
+with **no floppy**, with no keypress, and checks the shell, `tce=sda1`, and
+swap. It sends 192 KiB at 115200 and 1.5 KB at 9600 with
+`tools/send-file.sh` over the same COM1 (a QEMU pty), checking sha256 on
+both ends. Finally it boots the disk once more on `-M pc` (PIIX IDE).
+
 QEMU's 486 model is not a strict 486, so `scripts/check-i486.sh` also
 statically rejects post-486 opcodes (CMOV, NOPL, RDTSC, CX8, MMX/SSE...)
 in userland binaries.
@@ -131,10 +169,15 @@ in userland binaries.
 versions.env          pinned sources (+sha256)
 config/               kernel fragments (base, hdd, tce) + busybox applet list
 rootfs/               init, inittab, rcS (trimmed tc-config), tce-load, ...
-boot/syslinux.cfg     boot menu
-scripts/              host-tools, build-kernel, build-busybox, mkrootfs, mkfloppy, checks
-tests/                QEMU harness, test-disk builder, runner
+installer/            install.xz overlay: install-to-disk, login banner
+boot/syslinux.cfg     boot menu (rescue floppy)
+boot/installer.cfg    boot menu (installer floppy)
+boot/extlinux.conf    boot menu template for the installed disk
+scripts/              host-tools, build-kernel, build-busybox, build-extlinux, mkrootfs, mkfloppy, mkinstaller, checks
+tools/send-file.sh    host side of the serial (XMODEM) file transfer
+tests/                QEMU harness, test-disk builder, runners (run.sh, run-install.sh)
 docs/FEASIBILITY.md   research, budgets, risks, decisions
+docs/INSTALL.md       disk installer, layout, serial transfer, 755C checklist
 ```
 
 ## License

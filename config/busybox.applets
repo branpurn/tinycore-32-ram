@@ -170,3 +170,11 @@ UNXZ
 XZCAT
 CPIO
 FEATURE_CPIO_O
+# --- disk install + serial file transfer (install-to-disk, docs/INSTALL.md) ---
+# rx: XMODEM receive over the console tty; checksums to verify transfers;
+# blockdev re-reads the partition table after install-to-disk writes the MBR.
+RX
+MD5SUM
+SHA256SUM
+FEATURE_MD5_SHA1_SUM_CHECK
+BLOCKDEV

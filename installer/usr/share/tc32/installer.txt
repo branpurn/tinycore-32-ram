@@ -1,0 +1,7 @@
+
+tc32 INSTALLER -- installs tc32 onto the IDE disk, replacing what is there.
+  install-to-disk -n /dev/sda    show the plan (disk, layout), write nothing
+  install-to-disk /dev/sda       install (asks you to type YES first)
+  install-to-disk -h             options (partition sizes, -u update, -S source)
+Serial file transfer: rx FILE (XMODEM); see docs/INSTALL.md.
+
