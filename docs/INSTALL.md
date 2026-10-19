@@ -45,7 +45,7 @@ compatibility mode. Both are tested.
 | 1–2047 | 1 MiB | zeroed gap (old Win95 boot code wiped) |
 | `sda1` 2048 + 256 MiB | 256 MiB | **ext2**, label `TC32`, **bootable**: `/boot/vmlinuz`, `/boot/core.xz`, `/boot/sha256.txt`, `/boot/extlinux/{ldlinux.sys,extlinux.conf}`, `/tce/optional/`, `/tce/onboot.lst` |
 | `sda2` next 64 MiB | 64 MiB | Linux swap (type 82, auto-enabled by rcS) |
-| rest | ~1.5 GiB of a 2 GB card | **unpartitioned**, reserved for the future second stage |
+| rest | ~1.5 GiB of a 2 GB card | **unpartitioned**, reserved (the X second stage lives in `sda1`'s `/tce`, see [GRAPHICS.md](GRAPHICS.md)) |
 
 Notes on the choices:
 
@@ -109,7 +109,8 @@ pads the last block, the receiver cuts the file back to its exact size.
 
 The link is the console line itself: a StarTech ICUSB232FTN (FTDI, built-in
 null-modem wiring) as `/dev/ttyUSB0` on the host. The **console stays at
-9600** by default. Bulk transfers switch both ends to 115200 and back again.
+9600** by default. Bulk transfers switch both ends to 57600 (default; 115200
+overruns the 755C's UART, see below) and back again.
 
 ### With the helper (recommended)
 
@@ -117,20 +118,20 @@ Quit picocom first (`C-a C-q`), with the 755C sitting at its shell prompt:
 
 ```sh
 tools/send-file.sh second-stage.tcz /dev/ttyUSB0 /mnt/sda1/tce/optional/second-stage.tcz
-#   -b 115200 (default) transfer rate; -b 9600 = no switching; -c 9600 console rate
+#   -b 57600 (default) transfer rate; -b 9600 = no switching; -c 9600 console rate
 ```
 
 It types this one command line on the 755C:
 1. lower the console loglevel (so kernel messages can't land in the
    protocol stream);
-2. `stty 115200; rx FILE.part; stty 9600`;
+2. `stty 57600; rx FILE.part; stty 9600`;
 3. cut the file to its exact size;
 4. `sha256sum`.
 
-Meanwhile it runs `sx -k` at 115200, switches back to 9600, compares the
+Meanwhile it runs `sx -k` at 57600, switches back to 9600, compares the
 remote sha256 with the local one, and exits 0 only if they match. It
 prints the time and bytes/s. If you see retries or a mismatch, try
-`-b 57600` or `-b 38400`. Without lrzsz on the host, `make tools` builds
+`-b 38400`. It creates the remote directory if needed. Without lrzsz on the host, `make tools` builds
 `sx` into `build/host/bin`.
 
 ### By hand with picocom
@@ -140,8 +141,8 @@ picocom -b 9600 --send-cmd "sx -k -vv" /dev/ttyUSB0
 ```
 On the 755C type `rx /tmp/file`. Within 100 s press `C-a C-s` and give the
 local file name. Afterwards, compare `sha256sum /tmp/file` with the host's
-`sha256sum`. To go faster, type `stty 115200; rx /tmp/file; stty 9600` on the
-755C, then press `C-a C-u` in picocom until it reports 115200, send, and
+`sha256sum`. To go faster, type `stty 57600; rx /tmp/file; stty 9600` on the
+755C, then press `C-a C-u` in picocom until it reports 57600, send, and
 step back down to 9600 with `C-a C-d`. XMODEM may leave up to two `^Z` pad bytes at the
 end. The helper avoids this, and `.tcz`/`.xz`/`.gz` files tolerate it.
 
@@ -150,11 +151,14 @@ end. The helper avoids this, and `.tcz`/`.xz`/`.gz` files tolerate it.
 | Rate | Line maximum | XMODEM-1K, realistic | 1 MiB takes |
 |---|---:|---:|---:|
 | 9600 8N1 | 960 B/s | ~900 B/s | ~19 min |
-| 115200 8N1 | 11,520 B/s | ~10–11 KB/s if the UART keeps up | ~1.5–2 min |
+| 38400 8N1 | 3,840 B/s | ~3.3 KB/s (estimate) | ~5.3 min |
+| 57600 8N1 | 5,760 B/s | ~4.5 KB/s (estimate) | ~3.9 min |
+| 115200 8N1 | 11,520 B/s | **1.9 KB/s measured on the 755C** (many CRC retries) | **578 s measured** |
 
 XMODEM is stop-and-wait with CRC, so a dropped byte costs a 1 KiB block
-retry, not corruption. Whether the 755C's UART (16450 or 16550A) keeps up
-at 115200 is not verified yet. In QEMU (`make test-install`) a 192 KiB
+retry, not corruption. On the real 755C a 1 MiB kernel at 115200 arrived intact
+but took 578 s (1.9 KB/s): its UART cannot keep up, so the helper now
+defaults to 57600. The 57600/38400 rates are estimates until measured. In QEMU (`make test-install`) a 192 KiB
 transfer reaches about 55–70 KB/s, faster than any real line. QEMU's UART
 doesn't pace data at the configured baud, so that figure shows the
 protocol and helper working, not real-hardware speed.

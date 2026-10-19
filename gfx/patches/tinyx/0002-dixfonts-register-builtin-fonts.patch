@@ -1,0 +1,14 @@
+--- a/dix/dixfonts.c
++++ b/dix/dixfonts.c
+@@ -1859,9 +1859,9 @@
+     patternCache = MakeFontPatternCache();
+ 
+     {
+-#ifdef KDRIVESERVER
++        /* tc32: always register libXfont's built-in "fixed"/"cursor" fonts (the
++           KDRIVESERVER guard is never defined for dix/, so "built-ins" failed) */
+         BuiltinRegisterFpeFunctions();
+-#endif
+         FontFileRegisterFpeFunctions();
+     }
+ }

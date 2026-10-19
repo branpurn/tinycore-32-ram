@@ -1,0 +1,70 @@
+#!/bin/sh
+# tc32 startx: start TinyX Xfbdev on /dev/fb0 plus a session (jwm + rxvt).
+#   startx [-- SERVER-ARGS]     session: ~/.xinitrc, else /usr/local/etc/X11/xinitrc
+# Loads the X extensions from the tce dir if they are not loaded yet, and on
+# the tc755 kernel the 755C framebuffer (fb-wd90c24) and TrackPoint drivers.
+# Env: TC32X_MOUSE=/dev/... (default /dev/input/mice), TC32X_DISPLAY=:0
+D=${TC32X_DISPLAY:-:0}; N=${D#:}
+TCEDIR=$(readlink /etc/sysconfig/tcedir 2>/dev/null || echo /tmp/tce)
+say() { echo "startx: $*"; }
+load() {    # load EXT... from $TCEDIR/optional when present and not yet loaded
+    for e; do
+        [ -e "/usr/local/tce.installed/$e" ] && continue
+        [ -f "$TCEDIR/optional/$e.tcz" ] && tce-load -i "$TCEDIR/optional/$e.tcz" >/dev/null && say "loaded $e"
+    done
+}
+[ "$1" = "--" ] && shift
+# X clients talk to the server over AF_UNIX: only the graphics kernel has it
+[ -d /proc/net ] || { say "kernel $(uname -r) has no Unix sockets: boot the 'x' label (/boot/vmlinuz.x, docs/GRAPHICS.md)"; exit 1; }
+load Xlibs Xfbdev jwm rxvt Xaw-apps
+command -v Xfbdev >/dev/null || { say "Xfbdev not found: copy Xfbdev.tcz (+ Xlibs, jwm, rxvt) to $TCEDIR/optional"; exit 1; }
+
+# --- framebuffer ----------------------------------------------------------
+if [ ! -e /dev/fb0 ]; then
+    load modutils
+    case $(uname -r) in *-tc755*) load fb-wd90c24 ;; esac
+    i=0; while [ ! -e /dev/fb0 ] && [ $i -lt 5 ]; do sleep 1; i=$((i+1)); done
+fi
+[ -e /dev/fb0 ] || { say "no /dev/fb0. On the 755C boot the tc755 kernel and put fb-wd90c24.tcz in $TCEDIR/optional (docs/GRAPHICS.md)"; exit 1; }
+bpp=$(cat /sys/class/graphics/fb0/bits_per_pixel 2>/dev/null)
+fbname=$(awk '$1==0{ $1=""; print substr($0,2) }' /proc/fb 2>/dev/null)
+say "framebuffer: ${fbname:-?} ${bpp:-?} bpp"
+case $fbname in *VGA16*|*vga16*)
+    say "fb0 is vga16fb (4 bpp planar): Xfbdev needs a packed 8 bpp fb (wd90c24fb); see dmesg | grep wd90c24fb"; exit 1 ;;
+esac
+if [ -w /sys/module/wd90c24fb/parameters/keep ] && [ "$(cat /sys/module/wd90c24fb/parameters/trial 2>/dev/null)" != 0 ] \
+   && [ "$(cat /sys/module/wd90c24fb/parameters/keep 2>/dev/null)" != 1 ] && [ "$(cat /sys/module/wd90c24fb/parameters/keep 2>/dev/null)" != Y ]; then
+    say "wd90c24fb is in its trial period: text mode returns by itself unless you run"
+    say "  echo 1 > /sys/module/wd90c24fb/parameters/keep    (once the panel looks right)"
+fi
+
+# --- mouse: PS/2 AUX (755C TrackPoint) through mousedev -------------------
+M=${TC32X_MOUSE:-/dev/input/mice}
+if [ ! -e "$M" ]; then
+    load modutils; case $(uname -r) in *-tc755*) load trackpoint ;; esac; sleep 1
+fi
+if [ ! -e "$M" ]; then
+    # Never let Xfbdev probe on its own: its list ends in /dev/ttyS0 (the
+    # serial console). A FIFO nobody writes to = no pointer, keyboard only.
+    say "no mouse at $M: keyboard only"
+    M=/tmp/.X-nomouse; [ -p "$M" ] || { rm -f "$M"; mknod "$M" p; }
+fi
+
+# --- server + session -----------------------------------------------------
+# terminals need Unix98 ptys: tc32's rcS does not mount devpts
+grep -q ' /dev/pts devpts' /proc/mounts || { mkdir -p /dev/pts; mount -t devpts devpts /dev/pts; }
+[ -e "/tmp/.X$N-lock" ] && { say "display $D is in use (/tmp/.X$N-lock)"; exit 1; }
+mkdir -p /tmp/.X11-unix; chmod 1777 /tmp/.X11-unix
+export DISPLAY=$D HOME=${HOME:-/root}
+Xfbdev "$D" -mouse "$M" -2button "$@" > /tmp/Xfbdev.log 2>&1 &
+X=$!
+i=0; while [ ! -S "/tmp/.X11-unix/X$N" ]; do
+    kill -0 $X 2>/dev/null || { say "Xfbdev failed:"; tail -5 /tmp/Xfbdev.log; exit 1; }
+    i=$((i+1)); [ $i -gt 60 ] && { say "Xfbdev did not start in 30 s"; kill $X; exit 1; }
+    sleep 1
+done
+say "Xfbdev running on $D (log: /tmp/Xfbdev.log)"
+S=$HOME/.xinitrc; [ -r "$S" ] || S=/usr/local/etc/X11/xinitrc
+sh "$S"
+kill $X 2>/dev/null; wait $X 2>/dev/null
+say "X stopped"

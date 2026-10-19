@@ -1,0 +1,10 @@
+# tc32 graphics kernel add-on: AF_UNIX sockets for X (tinyconfig has no
+# networking at all). Only UNIX domain sockets, no TCP/IP, no devices.
+CONFIG_NET=y
+CONFIG_UNIX=y
+# CONFIG_INET is not set
+# CONFIG_PACKET is not set
+# CONFIG_WIRELESS is not set
+# CONFIG_ETHTOOL_NETLINK is not set
+# CONFIG_NETWORK_FILESYSTEMS is not set
+# CONFIG_NETDEVICES is not set

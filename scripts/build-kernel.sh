@@ -5,8 +5,9 @@
 FRAGS=${*:-${KERNEL_FRAGMENTS:-base hdd tce modules}}
 tb=$(fetch "$LINUX_URL" "$LINUX_SHA256"); unpack "$tb" "linux-$LINUX_VER"
 K="$BUILD/linux-$LINUX_VER"
-KO="$BUILD/kernel-obj"
-mkdir -p "$KO"
+KO=${KERNEL_OBJ:-$BUILD/kernel-obj}      # KERNEL_OBJ/KERNEL_OUT: alternate build (make gfx-kernel)
+KOUT=${KERNEL_OUT:-$OUT}
+mkdir -p "$KO" "$KOUT"
 set --
 for f in $FRAGS; do set -- "$@" "$TOP/config/kernel-$f.fragment"; done
 cd "$K"
@@ -23,6 +24,6 @@ for frag in "$@"; do
 done
 log "building bzImage (-j$JOBS)"
 make -s O="$KO" ARCH=i386 -j"$JOBS" bzImage
-cp "$KO/arch/x86/boot/bzImage" "$OUT/bzImage"
-cp "$KO/.config" "$OUT/kernel.config"
-log "bzImage: $(stat -c %s "$OUT/bzImage") bytes"
+cp "$KO/arch/x86/boot/bzImage" "$KOUT/bzImage"
+cp "$KO/.config" "$KOUT/kernel.config"
+log "bzImage: $(stat -c %s "$KOUT/bzImage") bytes"
