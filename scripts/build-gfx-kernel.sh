@@ -10,7 +10,7 @@
 #       (no NET) can never be loaded into it by mistake.
 . "$(dirname "$0")/common.sh"
 TC755_GIT=${TC755_GIT:-$( [ -d "$TOP/../thinkpad-755c-drivers/.git" ] && cd "$TOP/../thinkpad-755c-drivers" && pwd || echo https://github.com/branpurn/thinkpad-755c-drivers)}
-TC755_COMMIT=${TC755_COMMIT:-529b1b7}
+TC755_COMMIT=${TC755_COMMIT:-734a0ab}
 case ${1:-test} in
 test)
     KERNEL_OBJ="$BUILD/kernel-gfxtest" KERNEL_OUT="$OUT/gfx" \

@@ -1,0 +1,157 @@
+tc32: let a video-memory-shadow fbdev driver mirror screen copies and solid
+fills with its blitter (kdrive/fbdev + wd90c24fb, 0004): fbBltHook/fbSolidHook,
+only inside operations that do nothing else (fbHookScope).
+
+--- a/fb/fb.h
++++ b/fb/fb.h
+@@ -899,6 +899,26 @@
+ /*
+  * fbblt.c
+  */
++
++/*
++ * tc32: hooks for a frame buffer that is a shadow of video memory
++ * (kdrive/fbdev + wd90c24fb). fbBltHook runs before a GXcopy blit with all
++ * planes, fbSolidHook after a solid fill (and == 0); the driver decides
++ * from the pointers whether the frame buffer itself is involved.
++ */
++extern void (*fbBltHook) (FbBits * src, FbStride srcStride, int srcX,
++                          FbBits * dst, FbStride dstStride, int dstX,
++                          int width, int height, int bpp);
++extern void (*fbSolidHook) (FbBits * dst, FbStride dstStride, int dstX,
++                            int bpp, int width, int height, FbBits xor);
++/*
++ * The hooks only run while fbHookScope is set: inside an operation that
++ * does nothing but the copy or the fill (CopyArea and PolyFillRect from
++ * the protocol, CopyWindow, solid window backgrounds and borders). Text,
++ * arcs, wide lines etc. fill and then draw more on top in one operation.
++ */
++extern int fbHookScope;
++
+ extern _X_EXPORT void
+ 
+ fbBlt(FbBits * src,
+--- a/fb/fbblt.c
++++ b/fb/fbblt.c
+@@ -40,6 +40,11 @@
+     } \
+ }
+ 
++void (*fbBltHook) (FbBits * src, FbStride srcStride, int srcX,
++                   FbBits * dst, FbStride dstStride, int dstX,
++                   int width, int height, int bpp);
++int fbHookScope;
++
+ void
+ fbBlt(FbBits * srcLine,
+       FbStride srcStride,
+@@ -61,6 +66,10 @@
+ 
+     FbDeclareMergeRop();
+ 
++    if (fbHookScope && fbBltHook && alu == GXcopy && pm == FB_ALLONES)
++        (*fbBltHook) (srcLine, srcStride, srcX, dstLine, dstStride, dstX,
++                      width, height, bpp);
++
+     if (bpp == 24 && !FbCheck24Pix(pm)) {
+         fbBlt24(srcLine, srcStride, srcX, dstLine, dstStride, dstX,
+                 width, height, alu, pm, reverse, upsidedown);
+--- a/fb/fbsolid.c
++++ b/fb/fbsolid.c
+@@ -29,11 +29,29 @@
+ 
+ #include "fb.h"
+ 
++void (*fbSolidHook) (FbBits * dst, FbStride dstStride, int dstX,
++                     int bpp, int width, int height, FbBits xor);
++
++static void
++fbSolidBits(FbBits * dst,
++            FbStride dstStride,
++            int dstX, int bpp, int width, int height, FbBits and, FbBits xor);
++
+ void
+ fbSolid(FbBits * dst,
+         FbStride dstStride,
+         int dstX, int bpp, int width, int height, FbBits and, FbBits xor)
+ {
++    fbSolidBits(dst, dstStride, dstX, bpp, width, height, and, xor);
++    if (fbHookScope && fbSolidHook && !and)
++        (*fbSolidHook) (dst, dstStride, dstX, bpp, width, height, xor);
++}
++
++static void
++fbSolidBits(FbBits * dst,
++            FbStride dstStride,
++            int dstX, int bpp, int width, int height, FbBits and, FbBits xor)
++{
+     FbBits startmask, endmask;
+ 
+     int n, nmiddle;
+--- a/fb/fbwindow.c
++++ b/fb/fbwindow.c
+@@ -129,8 +129,10 @@
+                      prgnSrc);
+ 
+ 
++    fbHookScope++;
+     fbCopyRegion(pDrawable, pDrawable,
+                  0, &rgnDst, dx, dy, fbCopyWindowProc, 0, 0);
++    fbHookScope--;
+ 
+     REGION_UNINIT(&rgnDst);
+     fbValidateDrawable(&pWin->drawable);
+@@ -197,6 +199,7 @@
+ 
+     fbGetDrawable(pDrawable, dst, dstStride, dstBpp, dstXoff, dstYoff);
+ 
++    fbHookScope++;
+     while (n--) {
+             fbSolid(dst + (pbox->y1 + dstYoff) * dstStride,
+                     dstStride,
+@@ -207,6 +210,7 @@
+         fbValidateDrawable(pDrawable);
+         pbox++;
+     }
++    fbHookScope--;
+ }
+ 
+ 
+--- a/dix/dispatch.c
++++ b/dix/dispatch.c
+@@ -1691,6 +1691,9 @@
+     return (client->noClientException);
+ }
+ 
++/* tc32: fb/fb.h, video memory hooks of kdrive/fbdev (wd90c24fb) */
++extern int fbHookScope;
++
+ int
+ ProcCopyArea(register ClientPtr client)
+ {
+@@ -1719,9 +1722,11 @@
+ 
+     SET_DBE_SRCBUF(pSrc, stuff->srcDrawable);
+ 
++    fbHookScope++;              /* tc32: fb/fb.h */
+     pRgn = (*pGC->ops->CopyArea) (pSrc, pDst, pGC, stuff->srcX, stuff->srcY,
+                                   stuff->width, stuff->height,
+                                   stuff->dstX, stuff->dstY);
++    fbHookScope--;
+     if (pGC->graphicsExposures) {
+         (*pDst->pScreen->SendGraphicsExpose)
+             (client, pRgn, stuff->dstDrawable, X_CopyArea, 0);
+@@ -1945,9 +1950,12 @@
+         return (BadLength);
+     things >>= 3;
+ 
+-    if (things)
++    if (things) {
++        fbHookScope++;          /* tc32: fb/fb.h */
+         (*pGC->ops->PolyFillRect) (pDraw, pGC, things,
+                                    (xRectangle *) &stuff[1]);
++        fbHookScope--;
++    }
+     return (client->noClientException);
+ }
+ 

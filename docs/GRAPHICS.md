@@ -20,8 +20,11 @@ loaded with `tce-load -i` (or `onboot.lst`) and started with `startx`.
 * The sister repo **thinkpad-755c-drivers** (tc755) already has a native
   **`wd90c24fb`** module (`fb-wd90c24.tcz`): 640x480, **8 bpp packed,
   256-colour pseudocolour**, through the chip's PR0(A) banking with a
-  300 KiB shadow that `mmap()` gets and that is flushed at 10 Hz. That is
-  exactly what Xfbdev needs, and it falls back to vga16fb by itself.
+  300 KiB shadow that `mmap()` gets. That is exactly what Xfbdev needs,
+  and it falls back to vga16fb by itself. tc32's Xfbdev tells the driver
+  what it drew and lets the chip's BITBLT engine do screen copies and big
+  fills (section 5, "Speed"); any other mmap client gets the shadow
+  copied whole at 10 Hz.
   It needs the **tc755 kernel** (`6.18.57-tc755`: fbdev helpers built in,
   modules on disk), not the stock tc32 kernel, which refuses those modules.
 
@@ -127,6 +130,54 @@ taskbar, rxvt with `uname -a`), `x-vesa-2-menu.png` (jwm root menu opened
 by a mouse click), `x-vesa-3-apps.png` (xclock started from the menu,
 xcalc, xeyes); `x-wd-*.png` the same on the 755C kernel (bank 0 only).
 
+### Speed
+
+The 755C has no linear aperture (docs/HARDWARE.md in tc755): every pixel
+reaches video memory through the 64 KiB window, copied by the CPU over
+the VL-bus. Before, wd90c24fb copied Xfbdev's whole 300 KiB frame 10
+times a second whether anything changed or not: about a third of the CPU
+with X idle, and a picture that changed only 10 times a second. Now
+(gfx/patches/tinyx/0003, 0004 + tc755's `WDFB_IOC_OPS`):
+
+* Xfbdev reports **damage** (the rectangles it drew) before it sleeps;
+  only those are copied, merged, and paced so that a client drawing flat
+  out still leaves half the CPU (next update at least twice the last
+  one's cost later, at most ~66/s);
+* **CopyArea and window moves** (scrolling in rxvt/xedit, dragging) and
+  **big solid fills** (window backgrounds, clears) go to the WD90C24A
+  BITBLT engine: no bus copy at all;
+* nothing else changes: drawing still happens in the shadow by fb, so
+  the picture is the same; `TC32X_NOWDACCEL=1 startx` or
+  `echo 0 > /sys/module/wd90c24fb/parameters/xaccel` (before startx)
+  gives the old path for comparison.
+
+`make bench-gfx` (QEMU at about DX4-100 speed with an 8 MiB/s bus model;
+ops/s, higher is better; `tests/xbench`):
+
+| test | old: 10 Hz flush | damage only (plain C24) | damage + BITBLT (C24A) |
+|---|---:|---:|---:|
+| X idle, CPU busy | 26.5 % | 0.1 % | 0.1 % |
+| scroll 600x403 (CopyArea + fill + text) | 125.8 | 116.4 | 142.2 |
+| fill 200x150 | 584.7 | 540.3 | 733.7 |
+| 80-column ImageText | 670.7 | 628.2 | 624.7 |
+| move a 300x200 window | 238.1 | 195.6 | 231.9 |
+| bytes to video memory, scroll test | 10.8 MB | 7.1 MB | 2.2 MB |
+| picture updates | 10/s, whole frame | each change (paced) | each change (paced) |
+
+The old column's ops/s are flattering: it shows a tenth of a second's
+drawing at a time and drops the rest. What changes on the 755C is mostly
+the idle cost (gone), latency (an update is on screen when X goes idle,
+not up to 100 ms later), and scrolling/dragging (the engine instead of a
+copy over the bus). How much depends on the 755C's real window speed:
+measure it with docs/HW-CHECKLIST.md 1.6 in tc755 (`stats`). Solid-colour
+outline moves are already what jwm does (MoveMode/ResizeMode outline).
+
+Not done, and why: a linear aperture (none wired on the 755C's VL-bus
+board as far as the docs show), a hardware cursor (no datasheet for the
+C24A's cursor registers; the software cursor costs two small rectangles
+per move), dual banking (PR0A/PR0B read/write windows: the shadow means
+the CPU never reads video memory, so one window is enough).
+
 ## 6. Installing on the 755C
 
 The 755C keeps booting its current default label; nothing on the floppies
@@ -172,14 +223,15 @@ itself. Leave X with the jwm menu entry **Exit X** (Alt+F1).
 
 ## 7. Caveats for the real hardware
 
-* **wd90c24fb has not run on a real 755C yet** (it is QEMU-tested with
-  `fake=2`). It boots in its trial mode (`trial=30`): text mode comes back
-  by itself after 30 s unless you run
-  `echo 1 > /sys/module/wd90c24fb/parameters/keep` once the panel looks
-  right (startx reminds you). If it falls back to vga16fb, startx refuses
-  to start (4 bpp planar); check `dmesg | grep wd90c24fb`.
-* The **10 Hz shadow flush** costs CPU on a 486 and redraws are not
-  instant; dragging windows will be slow.
+* wd90c24fb runs X on the 755C. It no longer has a trial period by
+  default; boot with `wd90c24fb.trial=30` to get one when trying risky
+  settings (text mode comes back by itself unless
+  `echo 1 > /sys/module/wd90c24fb/parameters/keep`; startx reminds you).
+  If it falls back to vga16fb, startx refuses to start (4 bpp planar);
+  check `dmesg | grep wd90c24fb`.
+* Blanking: X's screen saver and `echo 1..4 > /sys/class/graphics/fb0/blank`
+  go to wd90c24fb: 1 blacks the picture, 2-4 also switch the panel and
+  its backlight off (tc755 docs/WD90C24.md "Blank levels").
 * QEMU screendumps look dim: QEMU's VBE mode has a fixed palette (static
   pseudocolour). wd90c24fb has a real programmable palette (the `x-wd-*`
   shots show true colours).

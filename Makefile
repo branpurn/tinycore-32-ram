@@ -9,6 +9,7 @@
 #        make gfx        X second stage: out/gfx/*.tcz (docs/GRAPHICS.md)
 #        make gfx-755c   755C graphics kernel out/gfx/755c/vmlinuz.x + driver .tcz
 #        make test-gfx   X in QEMU (vesafb test kernel + 755C kernel), screendumps
+#        make bench-gfx  X speed in QEMU: old 10 Hz flush vs damage vs BITBLT (out/test-logs/bench-*)
 #        make gfx-floppies  1.44 MB transfer floppies with the second stage
 .POSIX:
 SHELL = /bin/sh
@@ -83,6 +84,9 @@ test-gfx: image gfx gfx-kernel gfx-755c
 	tests/mk-gfx-disk.sh --deliver
 	python3 tests/gfx.py --mode wd
 
+bench-gfx: image gfx gfx-755c
+	tests/bench-gfx.sh
+
 gfx-floppies: gfx gfx-755c
 	tools/mk-gfx-floppies.sh
 
@@ -99,4 +103,4 @@ clean:
 distclean:
 	rm -rf out build
 
-.PHONY: all tools kernel busybox rootfs check image extlinux installer test sweep test-install run run-serial run-installer run-disk gfx gfx-kernel gfx-755c test-gfx gfx-floppies scan docker clean distclean
+.PHONY: all tools kernel busybox rootfs check image extlinux installer test sweep test-install run run-serial run-installer run-disk gfx gfx-kernel gfx-755c test-gfx bench-gfx gfx-floppies scan docker clean distclean

@@ -1,0 +1,304 @@
+tc32: Xfbdev on wd90c24fb (ThinkPad 755C): report damage to the driver and
+have the WD90C24A BITBLT engine do screen copies and big solid fills,
+instead of the driver copying the whole frame at 10 Hz. Inert on any
+other fbdev (the ioctls answer ENOTTY). TC32X_NOWDACCEL=1 turns it off.
+
+--- a/kdrive/fbdev/fbdev.c
++++ b/kdrive/fbdev/fbdev.c
+@@ -26,6 +26,8 @@
+ #endif
+ #include "fbdev.h"
+ #include <sys/ioctl.h>
++#include <stdlib.h>
++#include "damage.h"
+ 
+ #include <errno.h>
+ 
+@@ -613,9 +615,286 @@
+ 	return TRUE;
+ }
+ 
++/*
++ * tc32: wd90c24fb (ThinkPad 755C) damage + BITBLT, see wd90c24fb_ioctl.h
++ * in thinkpad-755c-drivers. The mapped frame is a shadow in system RAM
++ * that the driver would otherwise copy to video memory whole, 10 times a
++ * second, over the VL-bus. Instead the server tells it what it drew
++ * (DAMAGE, sent before the server sleeps), lets the BITBLT engine do
++ * screen-to-screen copies (COPY: scrolling, window moves; sent before the
++ * CPU copies the shadow, so video memory still holds the source) and big
++ * solid fills (FILL: window backgrounds, XFillRectangle; after the CPU
++ * fill). What the engine did is not sent again as damage. A driver
++ * without these ioctls answers ENOTTY and none of this is used.
++ */
++#define WDFB_CAP_DAMAGE	0x01
++#define WDFB_CAP_FILL	0x02
++#define WDFB_CAP_COPY	0x04
++#define WDFB_OP_DAMAGE	0
++#define WDFB_OP_FILL	1
++#define WDFB_OP_COPY	2
++#define WDFB_MAX_OPS	256
++#define WDFB_LOST	1
++struct wdfb_op {
++	__u8 op, color;
++	__u16 x, y, w, h, sx, sy, pad;
++};
++struct wdfb_ops {
++	__u32 n, flags;
++	__u64 ops;
++};
++#define WDFB_IOC_CAPS	_IOR('W', 0x24, __u32)
++#define WDFB_IOC_OPS	_IOW('W', 0x25, struct wdfb_ops)
++
++#define WD_MIN_COPY	1024	/* pixels; smaller copies and fills are */
++#define WD_MIN_FILL	2048	/* cheaper as plain damage */
++
++static struct {
++	ScreenPtr screen;
++	int fd;
++	__u32 caps;
++	CARD8 *base;
++	int pitch, width, height;
++	DamagePtr damage;
++	RegionRec pending;	/* drawn, not sent yet */
++	RegionRec done;		/* done by the engine in the current operation */
++	struct wdfb_op q[WDFB_MAX_OPS];
++	int nq;
++	CARD32 last, cost;	/* ms: when the last update was sent, its cost */
++} wd;
++
++static Bool wdLive(void)
++{
++	KdScreenPriv(wd.screen);
++
++	return wd.caps && pScreenPriv->enabled;
++}
++
++static void wdSubmit(void)
++{
++	struct wdfb_ops req;
++	int r;
++
++	if (!wd.nq)
++		return;
++	req.n = wd.nq;
++	req.flags = 0;
++	req.ops = (unsigned long) wd.q;
++	wd.nq = 0;
++	r = ioctl(wd.fd, WDFB_IOC_OPS, &req);
++	if (r == WDFB_LOST) {
++		if (ioctl(wd.fd, WDFB_IOC_CAPS, &wd.caps) < 0)
++			wd.caps = 0;
++		ErrorF("wd90c24fb: BITBLT engine lost, caps now 0x%x\n", wd.caps);
++	} else if (r < 0) {
++		ErrorF("wd90c24fb: WDFB_IOC_OPS: %s; the driver refreshes on its own\n",
++		       strerror(errno));
++		wd.caps = 0;
++	}
++}
++
++static void wdQueue(int op, int color, int x, int y, int w, int h, int sx, int sy)
++{
++	struct wdfb_op *o;
++
++	if (wd.nq == WDFB_MAX_OPS)
++		wdSubmit();
++	o = &wd.q[wd.nq++];
++	o->op = op;
++	o->color = color;
++	o->x = x;
++	o->y = y;
++	o->w = w;
++	o->h = h;
++	o->sx = sx;
++	o->sy = sy;
++	o->pad = 0;
++}
++
++static void wdQueuePending(void)
++{
++	int n = REGION_NUM_RECTS(&wd.pending);
++	BoxPtr b = REGION_RECTS(&wd.pending);
++
++	for (; n--; b++) {
++		int x1 = max(b->x1, 0), y1 = max(b->y1, 0);
++		int x2 = min(b->x2, wd.width), y2 = min(b->y2, wd.height);
++
++		if (x1 < x2 && y1 < y2)
++			wdQueue(WDFB_OP_DAMAGE, 0, x1, y1, x2 - x1, y2 - y1, 0, 0);
++	}
++	REGION_EMPTY(&wd.pending);
++}
++
++/* frame buffer pointer + bit offset -> pixel rectangle, if in the frame */
++static Bool wdRect(FbBits *line, FbStride stride, int bitX, int bitW, int h,
++		   int *x, int *y, int *w)
++{
++	long off = (CARD8 *) line - wd.base;
++
++	if (off < 0 || off >= (long) wd.pitch * wd.height ||
++	    stride * (long) sizeof(FbBits) != wd.pitch || bitX < 0)
++		return FALSE;
++	*y = off / wd.pitch;
++	*x = off % wd.pitch + (bitX >> 3);
++	*w = bitW >> 3;
++	return *w > 0 && h > 0 && *x + *w <= wd.width && *y + h <= wd.height;
++}
++
++static void wdDone(int x, int y, int w, int h)
++{
++	BoxRec box;
++	RegionRec r;
++
++	box.x1 = x;
++	box.y1 = y;
++	box.x2 = x + w;
++	box.y2 = y + h;
++	REGION_INIT(&r, &box, 1);
++	REGION_UNION(&wd.done, &wd.done, &r);
++	REGION_UNINIT(&r);
++}
++
++static void wdBltHook(FbBits *src, FbStride srcStride, int srcX, FbBits *dst,
++		      FbStride dstStride, int dstX, int width, int height, int bpp)
++{
++	int sx, sy, dx, dy, w, sw;
++
++	if (bpp != 8 || !(wd.caps & WDFB_CAP_COPY) || !wdLive() ||
++	    !wdRect(dst, dstStride, dstX, width, height, &dx, &dy, &w) ||
++	    !wdRect(src, srcStride, srcX, width, height, &sx, &sy, &sw) ||
++	    w * height < WD_MIN_COPY)
++		return;
++	wdQueuePending();	/* the source must be current in video memory */
++	wdQueue(WDFB_OP_COPY, 0, dx, dy, w, height, sx, sy);
++	wdSubmit();
++	if (wd.caps & WDFB_CAP_COPY)
++		wdDone(dx, dy, w, height);
++}
++
++static void wdSolidHook(FbBits *dst, FbStride dstStride, int dstX, int bpp,
++			int width, int height, FbBits xor)
++{
++	int x, y, w;
++
++	if (bpp != 8 || !(wd.caps & WDFB_CAP_FILL) || !wdLive() ||
++	    !wdRect(dst, dstStride, dstX, width, height, &x, &y, &w) ||
++	    w * height < WD_MIN_FILL)
++		return;
++	wdQueuePending();	/* keep the order: older damage first */
++	wdQueue(WDFB_OP_FILL, xor & 0xff, x, y, w, height, 0, 0);
++	wdDone(x, y, w, height);
++}
++
++/* after each operation (DamageSetReportAfterOp): its region */
++static void wdReport(DamagePtr pDamage, RegionPtr pRegion, void *closure)
++{
++	if (REGION_NOTEMPTY(&wd.done)) {
++		RegionRec t;
++
++		REGION_NULL(&t);
++		REGION_SUBTRACT(&t, &wd.done, pRegion);
++		if (!REGION_NOTEMPTY(&t)) {	/* the engine's work is this op's */
++			REGION_SUBTRACT(&t, pRegion, &wd.done);
++			REGION_UNION(&wd.pending, &wd.pending, &t);
++			REGION_UNINIT(&t);
++			REGION_EMPTY(&wd.done);
++			return;
++		}
++		REGION_UNINIT(&t);
++		REGION_EMPTY(&wd.done);
++	}
++	REGION_UNION(&wd.pending, &wd.pending, pRegion);
++}
++
++/*
++ * Before the server sleeps: send what was drawn. A client that draws
++ * flat out (scrolling a big window) would otherwise have every frame
++ * copied over the bus, so updates are paced: the next one waits until
++ * twice as long as the last took (or WD_FRAME_MS), and the regions drawn
++ * meanwhile merge. That keeps at least half the CPU for the clients and
++ * never copies more than they changed. Waiting for more damage costs
++ * nothing when the client is idle: the region is sent when the wait ends.
++ */
++#define WD_FRAME_MS	15
++
++static void wdBlockHandler(pointer data, OSTimePtr pTimeout, pointer pRead)
++{
++	CARD32 now, gap;
++
++	REGION_EMPTY(&wd.done);
++	if (!wdLive()) {
++		REGION_EMPTY(&wd.pending);
++		wd.nq = 0;
++		return;
++	}
++	if (REGION_NOTEMPTY(&wd.pending)) {
++		now = GetTimeInMillis();
++		gap = max(WD_FRAME_MS, 2 * wd.cost);
++		if (now - wd.last < gap) {
++			AdjustWaitForDelay(pTimeout, gap - (now - wd.last));
++			wdSubmit();	/* engine operations still queued */
++			return;
++		}
++		wdQueuePending();
++		wdSubmit();
++		wd.last = GetTimeInMillis();
++		wd.cost = min(wd.last - now, 500);
++		return;
++	}
++	wdSubmit();
++}
++
++static void wdWakeupHandler(pointer data, int i, pointer LastSelectMask)
++{
++}
++
++static void wdInit(ScreenPtr pScreen)
++{
++	KdScreenPriv(pScreen);
++	FbdevPriv *priv = pScreenPriv->card->driver;
++	PixmapPtr pPixmap = pScreen->GetScreenPixmap(pScreen);
++
++	if (getenv("TC32X_NOWDACCEL") || priv->var.bits_per_pixel != 8 ||
++	    ioctl(priv->fd, WDFB_IOC_CAPS, &wd.caps) < 0 ||
++	    !(wd.caps & WDFB_CAP_DAMAGE)) {
++		wd.caps = 0;
++		return;
++	}
++	wd.screen = pScreen;
++	wd.fd = priv->fd;
++	wd.base = (CARD8 *) priv->fb;
++	wd.pitch = priv->fix.line_length;
++	wd.width = priv->var.xres;
++	wd.height = priv->var.yres;
++	REGION_NULL(&wd.pending);
++	REGION_NULL(&wd.done);
++	wd.damage = DamageCreate(wdReport, NULL, DamageReportRawRegion, TRUE,
++				 pScreen, NULL);
++	if (!wd.damage ||
++	    !RegisterBlockAndWakeupHandlers(wdBlockHandler, wdWakeupHandler, NULL)) {
++		wd.caps = 0;
++		return;
++	}
++	DamageSetReportAfterOp(wd.damage, TRUE);
++	DamageRegister(&pPixmap->drawable, wd.damage);
++	fbBltHook = wdBltHook;
++	fbSolidHook = wdSolidHook;
++	ErrorF("wd90c24fb: damage%s%s to the driver\n",
++	       wd.caps & WDFB_CAP_COPY ? ", BITBLT copies" : "",
++	       wd.caps & WDFB_CAP_FILL ? ", BITBLT fills" : "");
++}
++
+ Bool fbdevCreateResources(ScreenPtr pScreen)
+ {
+-	return fbdevSetShadow(pScreen);
++	KdScreenPriv(pScreen);
++	FbdevScrPriv *scrpriv = pScreenPriv->screen->driver;
++
++	if (!fbdevSetShadow(pScreen))
++		return FALSE;
++	if (!scrpriv->shadow)
++		wdInit(pScreen);
++	return TRUE;
+ }
+ 
+ void fbdevPreserve(KdCardInfo * card)
