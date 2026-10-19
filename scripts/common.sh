@@ -28,14 +28,21 @@ fetch() {
     echo "$f"
 }
 
-# unpack TARBALL into $BUILD once (stamp file)
+# unpack TARBALL into $BUILD once (stamp file), then apply
+# patches/<name>/*.patch. The stamp records the patches' sha256, so adding
+# or changing a patch re-unpacks the tree (tar keeps upstream mtimes, so an
+# out-of-tree build only recompiles what the patches touch).
 unpack() {
     tb=$1 dir=$2
-    if [ ! -f "$BUILD/.unpacked-$dir" ]; then
+    pdir="$TOP/patches/${dir%%-[0-9]*}"
+    psum=""   # empty stamp = no patches
+    if ls "$pdir"/*.patch >/dev/null 2>&1; then
+        psum=$(cat "$pdir"/*.patch | sha256sum | cut -d' ' -f1)
+    fi
+    if [ ! -f "$BUILD/.unpacked-$dir" ] || [ "$(cat "$BUILD/.unpacked-$dir")" != "$psum" ]; then
         rm -rf "${BUILD:?}/$dir"
         log "unpacking $(basename "$tb")"
         tar -C "$BUILD" -xf "$tb"
-        pdir="$TOP/patches/${dir%%-[0-9]*}"
         if [ -d "$pdir" ]; then
             for p in "$pdir"/*.patch; do
                 [ -f "$p" ] || continue
@@ -43,6 +50,6 @@ unpack() {
                 patch -d "$BUILD/$dir" -p1 -s < "$p" || die "patch failed: $p"
             done
         fi
-        touch "$BUILD/.unpacked-$dir"
+        echo "$psum" > "$BUILD/.unpacked-$dir"
     fi
 }

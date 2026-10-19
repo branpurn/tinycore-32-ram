@@ -11,7 +11,9 @@ codes, a `tce` directory, `.tcz` squashfs extensions, `onboot.lst` and
   ext2, swap, loop + squashfs, APM, loadable modules (drivers ship as
   `.tcz`, see [thinkpad-755c-drivers](https://github.com/branpurn/thinkpad-755c-drivers)).
   Boots with `floppy=thinkpad` (the 755C inverts the floppy disk-change
-  line); use the `generic` boot label on other PCs. xz-compressed.
+  line) and `atkbd.xlate=2` (its keyboard controller claims raw mode but
+  sends set-1 codes; small kernel patch, see docs/INSTALL.md); use the
+  `generic` boot label on other PCs. xz-compressed.
 * **busybox 1.37** built statically against musl for `-march=i486`.
 * syslinux **4.07** on FAT12.
 
@@ -128,10 +130,14 @@ layout rationale, throughput and a real-hardware checklist are in
 
 ## Testing
 
-`tests/run.sh` (or `make test`) runs two 32 MB boots. The first types
+`tests/run.sh` (or `make test`) runs four 32 MB boots. The first types
 `tc32 floppy=0,thinkpad tce=sda1` at the prompt with the IDE test disk
-attached (23 checks). The second is a no-keypress, no-disk run of the
-default entry, exactly as on first real boot (16 checks). QEMU's floppy
+attached (26 checks). The second is a no-keypress, no-disk run of the
+default entry, exactly as on first real boot (19 checks). Two short
+keyboard runs boot with `i8042.direct=1` (a non-translating controller,
+which is how the 755C's looks to Linux): `generic` must keep a genuine raw
+set-2 keyboard working (8 checks), and `tc32` must switch to translated
+decoding with `atkbd.xlate=2` (7 checks). QEMU's floppy
 controller has a normal disk-change line, so the typed run undoes the
 755C's `floppy=thinkpad`; the default-entry run checks that the option is
 on the command line and skips the `/dev/fd0` mount, which needs the real
@@ -146,10 +152,11 @@ ttyS0 **and** tty1, tty1 respawn after kill, boot to a
 shell, `uname -m` = `i486`, `free`, `/proc` `/sys` `/dev` mounts, tmpfs file
 I/O, the floppy driver + FAT, the IDE disk via `tce=sda1`, swap
 auto-detection, `.tcz` auto-load from `onboot.lst` (xz) and `tce-load -i`
-(gzip), and an APM power-off. You get a pass/fail summary in
+(gzip), the PS/2 keyboard (text typed with QEMU `sendkey` must reach the
+tty1 shell, with no `Unknown key`), and an APM power-off. You get a pass/fail summary in
 `out/test-logs/summary.txt`, plus serial logs and JSON results.
 
-`tests/run-install.sh` (`make test-install`, 28 checks) builds a
+`tests/run-install.sh` (`make test-install`, 29 checks) builds a
 2,000,000,000-byte IDE disk with a FAT32 "Windows 95" partition and boots
 the installer. It runs `install-to-disk` over COM1 four ways: a dry run, a
 refused confirmation, a full install, and a second full install that must
@@ -168,6 +175,7 @@ in userland binaries.
 ```
 versions.env          pinned sources (+sha256)
 config/               kernel fragments (base, hdd, tce) + busybox applet list
+patches/linux/        kernel patches (atkbd.xlate for the 755C keyboard)
 rootfs/               init, inittab, rcS (trimmed tc-config), tce-load, ...
 installer/            install.xz overlay: install-to-disk, login banner
 boot/syslinux.cfg     boot menu (rescue floppy)

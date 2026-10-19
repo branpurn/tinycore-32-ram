@@ -14,18 +14,29 @@ SWEEP=""
 [ "${TC32_SWEEP:-0}" = 1 ] && SWEEP="24 16 12 10 8"
 rc=0
 summary=out/test-logs/summary.txt; : > "$summary"
+# hrun LOGNAME NOTE ARGS...: run the harness, keep its exit status (not tee's;
+# a harness crash counts as a failure), append its last line to the summary.
+hrun() {
+    log=out/test-logs/console-$1.txt note=$2; shift 2
+    { python3 tests/harness.py "$@"; echo $? > out/test-logs/.rc; } | tee "$log"
+    st=$(cat out/test-logs/.rc); rm -f out/test-logs/.rc
+    if tail -1 "$log" | grep -q '^== -m'; then tail -1 "$log" | sed "s/\$/$note/" >> "$summary"
+    else echo "== $* : FAIL (harness crashed, exit $st)$note" >> "$summary"; fi
+    return "$st"
+}
 for m in $MEMS; do
-    python3 tests/harness.py --mem "$m" | tee "out/test-logs/console-m$m.txt"
-    st=$?; [ $st -eq 0 ] || rc=1
-    tail -1 "out/test-logs/console-m$m.txt" >> "$summary"
+    hrun "m$m" "" --mem "$m" || rc=1
 done
 # Default boot path exactly as on real hardware: no keypress, no disk.
-python3 tests/harness.py --mem 32 --nokey | tee out/test-logs/console-m32-nokey.txt
-[ $? -eq 0 ] || rc=1
-tail -1 out/test-logs/console-m32-nokey.txt >> "$summary"
+hrun m32-nokey "" --mem 32 --nokey || rc=1
+# Keyboard on a non-translating i8042 (i8042.direct=1), which is how the
+# 755C's controller looks to Linux. raw = a genuine raw set-2 keyboard still
+# works with the auto default; forced = atkbd.xlate=2 decodes it as translated.
+for k in raw forced; do
+    hrun "m32-kbd-$k" "" --mem 32 --kbd "$k" || rc=1
+done
 for m in $SWEEP; do
-    python3 tests/harness.py --mem "$m" --boot-timeout 120 | tee "out/test-logs/console-m$m.txt"
-    tail -1 "out/test-logs/console-m$m.txt" | sed 's/$/  [headroom run, non-fatal]/' >> "$summary"
+    hrun "m$m" "  [headroom run, non-fatal]" --mem "$m" --boot-timeout 120 || :
 done
 echo; echo "===== tc32 test summary ====="; cat "$summary"
 exit $rc

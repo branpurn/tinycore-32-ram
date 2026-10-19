@@ -1,0 +1,66 @@
+Subject: [PATCH] Input: atkbd - decode a raw i8042 port that still translates
+
+The IBM ThinkPad 755C keyboard controller reads back its control register
+with XLATE (bit 6) clear, so i8042 registers a raw port and atkbd decodes
+scancode set 2 ("AT Raw Set 2 keyboard"). The controller still delivers
+translated set-1 codes, so every key is unknown, e.g. 'i' arrives as 0x17
+(make) and 0x97 (break, reported as code 0x117).
+
+Add atkbd.xlate: 1 (default) decodes such a port as translated when the
+keyboard ID came back in its translated form (0xab41 / 0xab54), 2 always
+decodes a raw i8042 port as translated, 0 restores upstream behaviour.
+Decode side only: the controller's CTR is never changed. Mode 2 applies
+after a successful keyboard probe, so the AUX port is not touched.
+
+--- a/drivers/input/keyboard/atkbd.c
++++ b/drivers/input/keyboard/atkbd.c
+@@ -65,6 +65,18 @@
+ module_param_named(terminal, atkbd_terminal, bool, 0);
+ MODULE_PARM_DESC(terminal, "Enable break codes on an IBM Terminal keyboard connected via AT/PS2");
+ 
++/*
++ * Some old i8042 controllers (seen on the IBM ThinkPad 755C) report bit 6
++ * (XLATE) of the control register as clear, so i8042 sets up a raw port,
++ * but they still deliver translated (set 1) scancodes. Decode such a port
++ * as translated: 0 = never, 1 = only if the keyboard ID came back
++ * translated (0xab41/0xab54, which a raw port cannot produce), 2 = always.
++ * Only raw i8042 ports are affected; this never touches the controller.
++ */
++static int atkbd_xlate = 1;
++module_param_named(xlate, atkbd_xlate, int, 0);
++MODULE_PARM_DESC(xlate, "Decode a raw i8042 port as translated (0 = no, 1 = auto by keyboard ID, 2 = always)");
++
+ #define SCANCODE(keymap)	((keymap >> 16) & 0xFFFF)
+ #define KEYCODE(keymap)		(keymap & 0xFFFF)
+ 
+@@ -854,6 +866,15 @@
+ 
+ 	atkbd->id = (param[0] << 8) | param[1];
+ 
++	if (!atkbd->translated && atkbd_xlate == 1 &&
++	    ps2dev->serio->id.type == SERIO_8042 &&
++	    (atkbd->id == 0xab41 || atkbd->id == 0xab54)) {
++		dev_info(&ps2dev->serio->dev,
++			 "keyboard ID %#06x is translated although the i8042 port is raw; decoding as translated\n",
++			 atkbd->id);
++		atkbd->translated = true;
++	}
++
+ 	if (atkbd->id == 0xaca1 && atkbd->translated) {
+ 		dev_err(&ps2dev->serio->dev,
+ 			"NCD terminal keyboards are only supported on non-translating controllers. "
+@@ -1320,6 +1341,14 @@
+ 			goto fail3;
+ 		}
+ 
++		/* After the probe, so the AUX port (no keyboard) is left alone. */
++		if (!atkbd->translated && atkbd_xlate == 2 &&
++		    serio->id.type == SERIO_8042) {
++			dev_info(&serio->dev,
++				 "raw i8042 port, decoding as translated (atkbd.xlate=2)\n");
++			atkbd->translated = true;
++		}
++
+ 		atkbd->set = atkbd_select_set(atkbd, atkbd_set, atkbd_extra);
+ 		atkbd_reset_state(atkbd);
+ 
