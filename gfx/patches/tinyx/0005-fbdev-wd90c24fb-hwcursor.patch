@@ -1,0 +1,234 @@
+tc32: kdrive fbdev hardware cursor through wd90c24fb WDFB_IOC_CURSOR
+(only when the driver offers WDFB_CAP_CURSOR, i.e. wd90c24fb.hwcursor=1;
+otherwise, or with TC32X_SOFTCURSOR set, the software cursor is used).
+
+--- a/kdrive/fbdev/fbdev.c
++++ b/kdrive/fbdev/fbdev.c
+@@ -30,6 +30,12 @@
+ #include "damage.h"
+ 
+ #include <errno.h>
++#include <string.h>
++#include "mipointer.h"
++#include "cursorstr.h"
++#include "colormapst.h"
++#include "resource.h"
++#include "servermd.h"
+ 
+ extern int KdTsPhyScreen;
+ 
+@@ -885,6 +891,185 @@
+ 	       wd.caps & WDFB_CAP_FILL ? ", BITBLT fills" : "");
+ }
+ 
++/*
++ * tc32: wd90c24fb hardware cursor (WDFB_CAP_CURSOR, offered only with
++ * wd90c24fb.hwcursor=1). Without it, or with TC32X_SOFTCURSOR set, kdrive
++ * falls back to the software cursor (miDC).
++ */
++#define WDFB_CAP_CURSOR	0x08
++#define WDFB_CUR_SHOW	0x01
++#define WDFB_CUR_SHAPE	0x02
++#define WDFB_CUR_POS	0x04
++struct wdfb_cursor {
++	__u16 flags;
++	__s16 x, y;
++	__u8 hotx, hoty, fg, bg, pad[2];
++	__u8 image[128], mask[128];
++};
++#define WDFB_IOC_CURSOR	_IOW('W', 0x26, struct wdfb_cursor)
++
++static struct {
++	int fd;
++	Bool on;		/* VT is ours */
++	CursorPtr cur;		/* current cursor, NULL = none */
++	int x, y;
++	Bool havePix;
++	Pixel fg, bg;		/* allocated in the default colormap */
++} wdc;
++
++static void wdcSend(int flags, struct wdfb_cursor *c)
++{
++	struct wdfb_cursor pos;
++
++	if (!c) {
++		memset(&pos, 0, sizeof(pos));
++		c = &pos;
++	}
++	c->flags = flags | (wdc.on && wdc.cur ? WDFB_CUR_SHOW : 0);
++	c->x = wdc.x;
++	c->y = wdc.y;
++	if (ioctl(wdc.fd, WDFB_IOC_CURSOR, c) < 0)
++		ErrorF("wd90c24fb: WDFB_IOC_CURSOR: %s\n", strerror(errno));
++}
++
++static Bool wdcRealize(ScreenPtr pScreen, CursorPtr pCursor)
++{
++	return TRUE;
++}
++
++static Bool wdcUnrealize(ScreenPtr pScreen, CursorPtr pCursor)
++{
++	return TRUE;
++}
++
++static unsigned char wdcBit(unsigned char *row, int x)
++{
++#if BITMAP_BIT_ORDER == LSBFirst
++	return (row[x >> 3] >> (x & 7)) & 1;
++#else
++	return (row[x >> 3] >> (7 - (x & 7))) & 1;
++#endif
++}
++
++static ColormapPtr wdcMap(ScreenPtr pScreen)
++{
++	return (ColormapPtr) LookupIDByType(pScreen->defColormap, RT_COLORMAP);
++}
++
++static Pixel wdcPixel(ScreenPtr pScreen, unsigned short r, unsigned short g,
++		      unsigned short b)
++{
++	ColormapPtr pmap = wdcMap(pScreen);
++	xColorItem c;
++
++	c.red = r;
++	c.green = g;
++	c.blue = b;
++	c.pixel = 0;
++	if (pmap)
++		FakeAllocColor(pmap, &c);
++	return c.pixel;
++}
++
++static void wdcLoad(ScreenPtr pScreen, CursorPtr pCursor)
++{
++	struct wdfb_cursor c;
++	CursorBitsPtr bits = pCursor->bits;
++	ColormapPtr pmap = wdcMap(pScreen);
++	int stride = BitmapBytePad(bits->width);
++	int w = min(bits->width, 32), h = min(bits->height, 32);
++	int r, i;
++
++	memset(&c, 0, sizeof(c));
++	for (r = 0; r < h; r++)
++		for (i = 0; i < w; i++) {
++			unsigned char bit = 0x80 >> (i & 7);
++
++			if (wdcBit(bits->mask + r * stride, i))
++				c.mask[r * 4 + (i >> 3)] |= bit;
++			if (wdcBit(bits->source + r * stride, i))
++				c.image[r * 4 + (i >> 3)] |= bit;
++		}
++	c.hotx = min(max(bits->xhot, 0), 31);
++	c.hoty = min(max(bits->yhot, 0), 31);
++	if (wdc.havePix && pmap) {
++		FakeFreeColor(pmap, wdc.fg);
++		FakeFreeColor(pmap, wdc.bg);
++	}
++	wdc.fg = wdcPixel(pScreen, pCursor->foreRed, pCursor->foreGreen,
++			  pCursor->foreBlue);
++	wdc.bg = wdcPixel(pScreen, pCursor->backRed, pCursor->backGreen,
++			  pCursor->backBlue);
++	wdc.havePix = TRUE;
++	c.fg = wdc.fg;
++	c.bg = wdc.bg;
++	wdcSend(WDFB_CUR_SHAPE | WDFB_CUR_POS, &c);
++}
++
++static void wdcSet(ScreenPtr pScreen, CursorPtr pCursor, int x, int y)
++{
++	wdc.cur = pCursor;
++	wdc.x = x;
++	wdc.y = y;
++	if (!wdc.on)
++		return;
++	if (pCursor)
++		wdcLoad(pScreen, pCursor);
++	else
++		wdcSend(WDFB_CUR_POS, NULL);
++}
++
++static void wdcMove(ScreenPtr pScreen, int x, int y)
++{
++	wdc.x = x;
++	wdc.y = y;
++	if (wdc.on && wdc.cur)
++		wdcSend(WDFB_CUR_POS, NULL);
++}
++
++static miPointerSpriteFuncRec wdcFuncs = {
++	wdcRealize, wdcUnrealize, wdcSet, wdcMove
++};
++
++Bool fbdevInitCursor(ScreenPtr pScreen)
++{
++	KdScreenPriv(pScreen);
++	FbdevPriv *priv = pScreenPriv->card->driver;
++	__u32 caps = 0;
++
++	if (getenv("TC32X_SOFTCURSOR") || getenv("TC32X_NOWDACCEL") ||
++	    priv->var.bits_per_pixel != 8 ||
++	    ioctl(priv->fd, WDFB_IOC_CAPS, &caps) < 0 ||
++	    !(caps & WDFB_CAP_CURSOR))
++		return FALSE;
++	wdc.fd = priv->fd;
++	wdc.on = TRUE;
++	if (!miPointerInitialize(pScreen, &wdcFuncs, &kdPointerScreenFuncs, FALSE))
++		return FALSE;
++	ErrorF("wd90c24fb: hardware cursor\n");
++	return TRUE;
++}
++
++void fbdevEnableCursor(ScreenPtr pScreen)
++{
++	wdc.on = TRUE;
++	if (wdc.cur)
++		wdcLoad(pScreen, wdc.cur);
++}
++
++void fbdevDisableCursor(ScreenPtr pScreen)
++{
++	wdc.on = FALSE;
++	wdcSend(WDFB_CUR_POS, NULL);	/* hidden: SHOW is clear */
++}
++
++void fbdevFiniCursor(ScreenPtr pScreen)
++{
++	wdc.on = FALSE;
++	wdc.cur = NULL;
++	wdcSend(WDFB_CUR_POS, NULL);
++}
++
+ Bool fbdevCreateResources(ScreenPtr pScreen)
+ {
+ 	KdScreenPriv(pScreen);
+--- a/kdrive/fbdev/fbdev.h
++++ b/kdrive/fbdev/fbdev.h
+@@ -77,4 +77,9 @@
+ 
+ void fbdevPutColors(ScreenPtr pScreen, int n, xColorItem * pdefs);
+ 
++Bool fbdevInitCursor(ScreenPtr pScreen);
++void fbdevEnableCursor(ScreenPtr pScreen);
++void fbdevDisableCursor(ScreenPtr pScreen);
++void fbdevFiniCursor(ScreenPtr pScreen);
++
+ #endif				/* _FBDEV_H_ */
+--- a/kdrive/fbdev/fbinit.c
++++ b/kdrive/fbdev/fbinit.c
+@@ -40,10 +40,10 @@
+ 	fbdevScreenFini,	/* scrfini */
+ 	fbdevCardFini,		/* cardfini */
+ 
+-	0,			/* initCursor */
+-	0,			/* enableCursor */
+-	0,			/* disableCursor */
+-	0,			/* finiCursor */
++	fbdevInitCursor,	/* initCursor (tc32: wd90c24fb) */
++	fbdevEnableCursor,	/* enableCursor */
++	fbdevDisableCursor,	/* disableCursor */
++	fbdevFiniCursor,	/* finiCursor */
+ 	0,			/* recolorCursor */
+ 
+ 	0,			/* initAccel */
