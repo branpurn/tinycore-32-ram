@@ -109,8 +109,9 @@ pads the last block, the receiver cuts the file back to its exact size.
 
 The link is the console line itself: a StarTech ICUSB232FTN (FTDI, built-in
 null-modem wiring) as `/dev/ttyUSB0` on the host. The **console stays at
-9600** by default. Bulk transfers switch both ends to 57600 (default; 115200
-overruns the 755C's UART, see below) and back again.
+9600** by default. Bulk transfers switch both ends to 38400 (default; the
+755C caps every faster rate at ~1.9 KB/s anyway, 115200 retries and 57600
+once lost a block) and back again.
 
 ### With the helper (recommended)
 
@@ -118,7 +119,7 @@ Quit picocom first (`C-a C-q`), with the 755C sitting at its shell prompt:
 
 ```sh
 tools/send-file.sh second-stage.tcz /dev/ttyUSB0 /mnt/sda1/tce/optional/second-stage.tcz
-#   -b 57600 (default) transfer rate; -b 9600 = no switching; -c 9600 console rate
+#   -b 38400 (default) transfer rate; -b 9600 = no switching; -c 9600 console rate
 ```
 
 It types this one command line on the 755C:

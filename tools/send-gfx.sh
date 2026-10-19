@@ -6,14 +6,14 @@
 #   tools/send-gfx.sh [-b BAUD] [-a] [-n] TTY [FILE...]
 #     TTY      console serial line, e.g. /dev/ttyUSB0 (often needs sudo/dialout)
 #     FILE...  only these (names as in the plan, e.g. Xlibs.tcz) to resume
-#     -b BAUD  transfer rate (default 57600; 38400 if 57600 still retries a lot)
+#     -b BAUD  transfer rate (default 38400: the only rate reliable on the 755C)
 #     -a       also send Xaw-apps.tcz (xclock, xcalc, xeyes; optional)
 #     -n       print the plan and time estimates only (no TTY used)
 # Files come from out/gfx (make gfx) and out/gfx/755c (make gfx-755c).
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 usage() { sed -n '6,12s/^# \{0,1\}//p' "$0" >&2; exit 2; }
-baud=57600 all= dry= dest=/mnt/sda1/gfx
+baud=38400 all= dry= dest=/mnt/sda1/gfx
 while getopts b:anh o; do
     case $o in b) baud=$OPTARG ;; a) all=1 ;; n) dry=1 ;; *) usage ;; esac
 done
@@ -29,8 +29,13 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT INT TERM
 for f in $files; do [ -f "$f" ] || { echo "send-gfx: missing $f (make gfx gfx-755c)" >&2; exit 1; }; done
 ( for f in $files; do printf '%s  %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(basename "$f")"; done ) > "$tmp/sha256.txt"
 files="$tmp/sha256.txt $files"
-# B/s: 115200 measured on the 755C (1 MiB kernel in 578 s); the rest are estimates
-rate() { case $1 in 115200) echo 1900 ;; 57600) echo 4500 ;; 38400) echo 3300 ;; 19200) echo 1700 ;; 9600) echo 900 ;; *) echo $(($1 / 13)) ;; esac; }
+# B/s measured on the 755C: its side caps 115200/57600/38400 at ~1.9 KB/s
+# (~1.4 KB/s while X runs; X_RUNNING=1 uses that). 19200/9600 = estimates.
+# .dep files are not sent: startx loads the dependencies itself.
+rate() {
+    if [ -n "$X_RUNNING" ]; then echo 1400; return; fi
+    case $1 in 115200|57600|38400) echo 1900 ;; 19200) echo 1700 ;; 9600) echo 900 ;; *) echo $(($1 / 13)) ;; esac
+}
 r=$(rate "$baud")
 tot=0 sel=
 for f in $files; do
@@ -40,7 +45,7 @@ for f in $files; do
     printf 'send-gfx: %-16s %8d bytes  ~%4d s at %s baud\n' "$b" "$s" $(( (s + 1023) / r + 4 )) "$baud"
 done
 n=$(echo $sel | wc -w)
-printf 'send-gfx: %d files, %d bytes, ~%d min at %s baud (%d B/s; 115200 = measured, others = estimates)\n' \
+printf 'send-gfx: %d files, %d bytes, ~%d min at %s baud (%d B/s; 38400 and up = measured, ~1400 with X running)\n' \
     "$n" "$tot" $(( (tot / r + n * 4 + 59) / 60 )) "$baud" "$r"
 [ -z "$dry" ] || exit 0
 for f in $sel; do
