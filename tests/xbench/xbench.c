@@ -91,7 +91,7 @@ static void t_move(void)
 	int i, n = 120;
 	double t0;
 
-	a.override_redirect = True;
+	a.override_redirect = !getenv("XBENCH_MANAGED");
 	a.background_pixel = 0x30;
 	m = XCreateWindow(d, DefaultRootWindow(d), 20, 40, 300, 200, 1, CopyFromParent,
 			  InputOutput, CopyFromParent, CWOverrideRedirect | CWBackPixel, &a);
@@ -122,7 +122,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "xbench: cannot open display\n");
 		return 1;
 	}
-	a.override_redirect = True;
+	/* XBENCH_MANAGED=1: let the window manager frame the windows (real use) */
+	a.override_redirect = !getenv("XBENCH_MANAGED");
 	a.background_pixel = WhitePixel(d, 0);
 	w = XCreateWindow(d, DefaultRootWindow(d), 10, 10, W, H, 0, CopyFromParent,
 			  InputOutput, CopyFromParent, CWOverrideRedirect | CWBackPixel, &a);
@@ -130,7 +131,8 @@ int main(int argc, char **argv)
 	XMapRaised(d, w);
 	XWindowEvent(d, w, ExposureMask, &e);
 	gc = XCreateGC(d, w, 0, NULL);
-	XSetGraphicsExposures(d, gc, False);
+	/* XBENCH_GEXP=1: keep GraphicsExpose events on, as rxvt and Xaw do */
+	XSetGraphicsExposures(d, gc, getenv("XBENCH_GEXP") != NULL);
 	XSync(d, False);
 	for (i = argc > 1 ? 1 : 0; i < (argc > 1 ? argc : 1); i++) {
 		const char *t = argc > 1 ? argv[i] : "all";

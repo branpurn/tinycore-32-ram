@@ -1,0 +1,19 @@
+tc32: scroll with XCopyArea also when the window is partly covered
+(SLOW_REFRESH, the state after VisibilityPartiallyObscured and at
+startup), not only when fully visible. Under jwm the rxvt window is
+rarely reported Unobscured, so every scroll redrew all text; with
+Xfbdev on wd90c24fb a CopyArea is one BITBLT copy. Covered parts come
+back as GraphicsExpose, which rxvt already handles.
+
+--- a/src/screen.c
++++ b/src/screen.c
+@@ -2086,7 +2086,8 @@
+  *    This has been deliberately kept simple.
+  */
+     i = h->num_scr;
+-    if (refresh_type == FAST_REFRESH && h->num_scr_allow && i
++    if ((refresh_type == FAST_REFRESH || refresh_type == SLOW_REFRESH)
++	&& h->num_scr_allow && i
+ 	&& abs(i) < r->TermWin.nrow && !must_clear) {
+ 	int16_t         nits;
+ 	int             j;
