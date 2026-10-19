@@ -82,11 +82,12 @@ strips everything, checks every ELF with `check-i486.sh` and writes
 ## 4. Measured sizes and transfer times
 
 `make gfx` (out/gfx/sizes.txt). Transfer = XMODEM-1K via
-`tools/send-file.sh`. **115200 is measured on the 755C** (1 MiB kernel in
-578 s = 1.9 KB/s, many CRC retries: its UART overruns). **57600 (~4.5 KB/s)
-and 38400 (~3.3 KB/s) are estimates**; 9600 ~0.9 KB/s. Hence the new
-default of `send-file.sh`/`send-gfx.sh` is **57600** (use `-b 38400` if
-57600 still retries a lot).
+`tools/send-file.sh`. **Measured on the 755C: its side caps throughput at
+~1.9 KB/s at 115200, 57600 and 38400 alike**, ~1.33-1.41 KB/s while X is
+running. 115200 gives CRC retries, 57600 once lost a block (caught by the
+checksum), 38400 was reliable for every file, so **38400 is the default**
+of `send-file.sh`/`send-gfx.sh`. The 57600/38400 columns below are the
+old estimates: use the 115200 column (1.9 KB/s) for all three rates.
 
 | file | from | `.tcz` bytes | installed | 115200 (meas.) | 57600 (est.) | 38400 (est.) |
 |---|---|---:|---:|---:|---:|---:|
@@ -187,7 +188,7 @@ changes. Build on the host: `make gfx gfx-755c`.
 
 ```sh
 tools/send-gfx.sh -n                     # plan + estimates, no port used
-sudo tools/send-gfx.sh /dev/ttyUSB0      # default 57600; -b 38400 if it retries; -a adds Xaw-apps
+sudo tools/send-gfx.sh /dev/ttyUSB0      # default 38400 (reliable); -a adds Xaw-apps
 #   resume after a failure with:  sudo tools/send-gfx.sh /dev/ttyUSB0 Xlibs.tcz vmlinuz.x
 ```
 
@@ -235,8 +236,8 @@ itself. Leave X with the jwm menu entry **Exit X** (Alt+F1).
 * QEMU screendumps look dim: QEMU's VBE mode has a fixed palette (static
   pseudocolour). wd90c24fb has a real programmable palette (the `x-wd-*`
   shots show true colours).
-* `vmlinuz.x` is 1.2 MB, the biggest single transfer (~4.5 min at 57600,
-  estimate). Keep the old kernel and labels as they are; if `x` does not
+* `vmlinuz.x` is 1.2 MB, the biggest single transfer (~11 min at
+  1.9 KB/s, measured). Keep the old kernel and labels as they are; if `x` does not
   boot, the default label still does.
 * Mouse: the TrackPoint is 2 buttons, so Xfbdev runs with `-2button`
   (press both for a middle click). Without a mouse X still starts,
@@ -263,3 +264,44 @@ itself. Leave X with the jwm menu entry **Exit X** (Alt+F1).
 - Text goes to the panel by BITBLT colour expansion (`wd90c24fb.cexp`,
   default 1, self-tested at load with automatic fallback): the driver
   sends two-colour damage one bit per pixel, so no TinyX change is needed.
+
+## 8. Real 755C results and known issues (round 3, driver d8c5bda)
+
+Measured on the real ThinkPad 755C (WD90C24A/A2, 486 DX4-100):
+
+- **Serial:** ~1.9 KB/s cap on the 755C side at 115200/57600/38400,
+  ~1.33-1.41 KB/s while X runs; 38400 is the reliable default (section 4).
+  `send-gfx.sh` does not send `.dep` files; that is fine, `startx` loads
+  the dependencies itself.
+- **Replacing loaded packages:** while a `.tcz` in `tce/optional` is
+  loop-mounted, replace it with `mv` (rename) from the staging directory,
+  never `cp` over it.
+- **Boot:** extlinux prints `boot:` after the SYSLINUX banner (TIMEOUT 30
+  = 3 s). Automation must match that prompt, not the `reboot:` in the
+  shutdown text (that once picked the default label). X does not start by
+  itself: run `startx`.
+- **Speed:** shadow flush to video memory through PR0A banking ~8.6 MB/s
+  (50.5 MB in 5.86 s). Damage + BITBLT works (Xfbdev log "damage, BITBLT
+  copies, BITBLT fills to the driver"; "feels smoother"). With the rxvt
+  patch, `copies=` is above 0 in real use (2 in a short session; 0 after
+  75k rects before).
+- **Hardware cursor:** works, pixel-exact, no `hwc_xoff`/`hwc_yoff` needed;
+  "very smooth cursor".
+- **Colour expansion:** only variant 0 passes on the chip; the port write
+  (~0.3 us) makes it no faster than the memory copy (est. 1.0x), so
+  `cexp=1` leaves it off. See the driver repo's docs/WD90C24.md.
+- **Screen saver:** X's idle saver blanks fb0 (seen at levels 3 and 4).
+- **Memory:** kernel reports 32732 kB; ~21-22 MB available under X with
+  jwm, rxvt and the Xaw apps.
+
+Known issues / open:
+
+- **Backlight:** no blank level turns it off on this unit (levels 3/4 left
+  it on with the brightness slider at max; an earlier "off" at level 3 was
+  the slider at minimum). APM display standby probably needs the battery,
+  which is not installed. Fn+F3 does turn it off. Parked.
+- **poweroff** hangs at "reboot: Power down" (APM BIOS 1.0, flags 0x03).
+  Disks are synced and stopped before that, so switching off by hand is
+  safe. Open follow-up.
+- **No CMOS battery:** keep the machine warm and avoid cold boots during a
+  session (settings and clock are lost).

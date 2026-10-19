@@ -6,7 +6,7 @@
 #     FILE         local file
 #     TTY          the console serial line, e.g. /dev/ttyUSB0
 #     REMOTE_PATH  destination on tc32 (default /tmp/<name of FILE>)
-#     -b BAUD      transfer rate (default 57600; equal to -c = no switching)
+#     -b BAUD      transfer rate (default 38400; equal to -c = no switching)
 #     -c BAUD      console rate (default 9600, as configured on tc32)
 #
 # Before running: tc32 must be at a shell prompt on that console, and no
@@ -15,9 +15,11 @@
 # into build/host/bin if the host has none. Exit status 0 = checksum match.
 set -eu
 usage() { sed -n '5,10s/^# \{0,1\}//p' "$0" >&2; exit 2; }
-# 57600: at 115200 the 755C's UART overruns (measured 1.9 KB/s with many CRC
-# retries for a 1 MiB kernel); 57600 should give ~4.5 KB/s (estimate).
-baud=57600 cbaud=9600
+# 38400: measured on the 755C, its side caps throughput at ~1.9 KB/s at
+# 115200, 57600 and 38400 alike (~1.33-1.41 KB/s while X runs). 115200
+# gave CRC retries, 57600 once lost a block (caught by the checksum);
+# 38400 was reliable for every file.
+baud=38400 cbaud=9600
 while getopts b:c:h o; do
     case $o in b) baud=$OPTARG ;; c) cbaud=$OPTARG ;; *) usage ;; esac
 done
