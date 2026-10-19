@@ -99,8 +99,13 @@ rootfs, so TC's copy only doubles peak RAM.
 | 1.44 MB floppy | 1,474,560 | 1440 |
 | FAT12 metadata (boot sector, 2 FATs, root dir) + syslinux 4.07 `ldlinux.sys` + cfg | ~55,000 | ~54 |
 | `vmlinuz`: Linux 6.18.57, i486, xz (base + IDE/ext2 + squashfs/loop + APM + loadable modules) | 1,085,952 | 1060 |
-| `core.xz`: initramfs (busybox 1.37.0 static musl, 92 applets incl. getty + scripts) | 214,624 | 209 |
-| **Free on the floppy FAT** (persistence, a `.tcz` or two) | **117,760** | **115** |
+| `core.xz`: initramfs (busybox 1.37.0 static musl, 96 applets incl. getty, rx, sha256sum + scripts) | 217,904 | 213 |
+| **Free on the floppy FAT** (persistence, a `.tcz` or two) | **114,688** | **112** |
+
+The installer floppy (`out/installer.img`, see [INSTALL.md](INSTALL.md))
+carries the same files plus `install.xz` (70,824 B: install-to-disk + a
+static extlinux 4.07 with embedded ldlinux.sys + mbr.bin) and `sha256.txt`.
+That leaves 43,008 B free.
 
 Kernel cost per feature group (measured):
 * base (console, keyboard, serial, floppy, FAT, tmpfs, initrd): 905,728 B
@@ -223,6 +228,8 @@ Fallback layouts, if feature creep pushes past 1.44 MB:
    and the rest lives on the 755C's IDE disk (or a CF-to-2.5" IDE
    adapter), e.g. `tce=hda1`. This is closest to TC's frugal install.
 3. **HDD only**: syslinux/extlinux on the IDE disk, no floppy.
+   **Implemented** as the installer floppy + `install-to-disk`
+   ([INSTALL.md](INSTALL.md)), still run-from-RAM with `tce=sda1`.
 
 ## 7. Next steps
 
@@ -230,7 +237,8 @@ Fallback layouts, if feature creep pushes past 1.44 MB:
    photo, or capture the COM1 log, which is on by default (see README, "Serial console").
 2. Decide D1–D5.
 3. Patch out the perf events properly (about 60–70 KiB of floppy space).
-4. Try the HDD path on hardware (`tce=hda1`, swap partition).
+4. Try the HDD path on hardware: installer floppy -> `install-to-disk /dev/sda`
+   on the CF card, then boot without the floppy (checklist in INSTALL.md).
 5. If D2 is wanted, build the glibc-from-TC-17 extension and test stock
    `.tcz` packages.
 6. Optional: run an 86Box/Bochs strict-486 CI step.
