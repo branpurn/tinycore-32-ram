@@ -251,12 +251,15 @@ itself. Leave X with the jwm menu entry **Exit X** (Alt+F1).
 ## 755C: hardware cursor, rxvt scrolling (round 2)
 
 - Xfbdev uses the WD90C24A hardware cursor when the driver offers it
-  (`wd90c24fb.hwcursor=1`; off by default until checked on the chip with
-  `cursor_test`, see thinkpad-755c-drivers docs/HW-CHECKLIST.md). Else, or
-  with `TC32X_SOFTCURSOR=1`, the software cursor (TinyX patch 0005).
+  (`wd90c24fb.hwcursor`, default 1; check it with `cursor_test`, see
+  thinkpad-755c-drivers docs/HW-CHECKLIST.md). With `hwcursor=0`, or
+  `TC32X_SOFTCURSOR=1`, the software cursor (TinyX patch 0005).
 - rxvt scrolls with XCopyArea (one BITBLT copy) also when its window is
   partly covered (gfx/patches/rxvt). Before, it redrew all text unless jwm
   reported it fully unobscured, so `copies=` stayed 0 on the 755C. Lines
   that differ in 8 or fewer characters are still redrawn (rxvt's rule).
 - `tests/xbench`: `XBENCH_MANAGED=1` (a normal jwm window) and
   `XBENCH_GEXP=1` (graphics exposures) for checking the copy path.
+- Text goes to the panel by BITBLT colour expansion (`wd90c24fb.cexp`,
+  default 1, self-tested at load with automatic fallback): the driver
+  sends two-colour damage one bit per pixel, so no TinyX change is needed.
