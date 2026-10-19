@@ -1,0 +1,3 @@
+# tc32: only the C locale (musl reports C.UTF-8); full set: libX11 share/X11/locale
+C/XLC_LOCALE			C
+C/XLC_LOCALE:			C

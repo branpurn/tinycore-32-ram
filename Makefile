@@ -6,6 +6,10 @@
 #        make test-install  install onto a 2 GB IDE disk in QEMU, boot it without
 #                        the floppy, XMODEM transfer over the console + checksum
 #        make run        interactive QEMU (VGA window)    make run-serial (terminal)
+#        make gfx        X second stage: out/gfx/*.tcz (docs/GRAPHICS.md)
+#        make gfx-755c   755C graphics kernel out/gfx/755c/vmlinuz.x + driver .tcz
+#        make test-gfx   X in QEMU (vesafb test kernel + 755C kernel), screendumps
+#        make gfx-floppies  1.44 MB transfer floppies with the second stage
 .POSIX:
 SHELL = /bin/sh
 KERNEL_FRAGMENTS ?= base hdd tce modules
@@ -63,6 +67,25 @@ run-installer:
 run-disk:
 	qemu-system-i386 -accel tcg -M isapc -cpu 486 -m 32 -drive if=ide,format=raw,file=out/hd-2g.img -boot c -nographic
 
+gfx: tools
+	scripts/build-gfx.sh
+	scripts/mktcz-gfx.sh
+
+gfx-kernel: tools
+	scripts/build-gfx-kernel.sh test
+
+gfx-755c: tools
+	scripts/build-gfx-kernel.sh 755c
+
+test-gfx: image gfx gfx-kernel gfx-755c
+	tests/mk-gfx-disk.sh
+	python3 tests/gfx.py --mode vesa
+	tests/mk-gfx-disk.sh --deliver
+	python3 tests/gfx.py --mode wd
+
+gfx-floppies: gfx gfx-755c
+	tools/mk-gfx-floppies.sh
+
 scan:
 	scripts/scan-public.sh
 
@@ -71,9 +94,9 @@ docker:
 	docker run --rm -v "$$PWD":/src -w /src -u "$$(id -u):$$(id -g)" tc32-build make image
 
 clean:
-	rm -rf out build/kernel-obj build/rootfs-stage build/floppy-stage build/test-disk build/core.cpio build/rootfs.list build/installer-stage build/installer-floppy build/install.cpio build/install.list
+	rm -rf out build/kernel-obj build/kernel-gfxtest build/gfx/tcz build/gfx/test-disk build/rootfs-stage build/floppy-stage build/test-disk build/core.cpio build/rootfs.list build/installer-stage build/installer-floppy build/install.cpio build/install.list
 
 distclean:
 	rm -rf out build
 
-.PHONY: all tools kernel busybox rootfs check image extlinux installer test sweep test-install run run-serial run-installer run-disk scan docker clean distclean
+.PHONY: all tools kernel busybox rootfs check image extlinux installer test sweep test-install run run-serial run-installer run-disk gfx gfx-kernel gfx-755c test-gfx gfx-floppies scan docker clean distclean

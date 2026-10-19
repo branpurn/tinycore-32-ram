@@ -105,8 +105,8 @@ log, then a `root@box:~#` shell.
 UARTs/BIOS setups and long or cheap cables, and it matches the syslinux and
 BIOS defaults. The cost is speed. The kernel log (~5 KB) takes about
 5–6 s to print, and printk to a serial console is synchronous, so a
-verbose boot is a few seconds slower. 115200 is likely fine if the 755C's
-UART is a 16550A, but it is not verified. To try it, change both
+verbose boot is a few seconds slower. 115200 is too fast for the 755C's
+UART (file transfers at 115200 measured 1.9 KB/s with many CRC retries). To try it, change both
 `SERIAL 0 9600` and `ttyS0,9600n8` in `boot/syslinux.cfg` and the `9600`
 in `rootfs/etc/inittab`.
 
@@ -124,9 +124,17 @@ bootable: kernel, `core.xz`, extlinux 4.07 and `/tce`. It adds `sda2`,
 The disk boots with the same 9600 COM1 + VGA console and `tce=sda1`. Re-running
 is safe, and `-u` refreshes only the boot files. To send files over the
 serial console, use `tools/send-file.sh FILE /dev/ttyUSB0 [REMOTE]` (XMODEM
-via busybox `rx`, temporarily at 115200, sha256-verified). Details,
+via busybox `rx`, temporarily at 57600, sha256-verified). Details,
 layout rationale, throughput and a real-hardware checklist are in
 [docs/INSTALL.md](docs/INSTALL.md).
+
+**Graphics (X) second stage**, loaded from the CF card, floppies
+unchanged: TinyX Xfbdev 640x480x8 on the 755C's `wd90c24fb`, jwm (root
+menu + taskbar), rxvt, optional xclock/xcalc/xeyes, TrackPoint mouse, all
+`.tcz` (1.4 MB + a 1.2 MB graphics kernel). `make gfx gfx-755c`, then
+`tools/send-gfx.sh /dev/ttyUSB0` (or `make gfx-floppies`), `gfx-setup.sh`
+on the 755C, boot label `x`, `startx`. See
+[docs/GRAPHICS.md](docs/GRAPHICS.md); `make test-gfx` tests it in QEMU.
 
 ## Testing
 

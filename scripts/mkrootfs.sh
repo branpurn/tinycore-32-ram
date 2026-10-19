@@ -7,7 +7,7 @@ K="$BUILD/linux-$LINUX_VER"; KO="$BUILD/kernel-obj"
 [ -x "$KO/usr/gen_init_cpio" ] || die "build the kernel first (needs usr/gen_init_cpio)"
 [ -x "$OUT/busybox" ] || die "build busybox first"
 S="$BUILD/rootfs-stage"; rm -rf "$S"; mkdir -p "$S"
-for d in bin sbin usr/bin usr/sbin etc dev proc sys tmp mnt root home/tc opt usr/local/bin usr/local/tce.installed var/run; do mkdir -p "$S/$d"; done
+for d in bin sbin usr/bin usr/sbin etc etc/sysconfig dev proc sys tmp mnt root home/tc opt usr/local/bin usr/local/tce.installed var/run; do mkdir -p "$S/$d"; done
 cp "$OUT/busybox" "$S/bin/busybox"
 "$OUT/busybox" --list-full | while read -r a; do
     [ -e "$S/$a" ] || ln -s /bin/busybox "$S/$a"

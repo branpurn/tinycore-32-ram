@@ -6,7 +6,7 @@
 #     FILE         local file
 #     TTY          the console serial line, e.g. /dev/ttyUSB0
 #     REMOTE_PATH  destination on tc32 (default /tmp/<name of FILE>)
-#     -b BAUD      transfer rate (default 115200; equal to -c = no switching)
+#     -b BAUD      transfer rate (default 57600; equal to -c = no switching)
 #     -c BAUD      console rate (default 9600, as configured on tc32)
 #
 # Before running: tc32 must be at a shell prompt on that console, and no
@@ -15,7 +15,9 @@
 # into build/host/bin if the host has none. Exit status 0 = checksum match.
 set -eu
 usage() { sed -n '5,10s/^# \{0,1\}//p' "$0" >&2; exit 2; }
-baud=115200 cbaud=9600
+# 57600: at 115200 the 755C's UART overruns (measured 1.9 KB/s with many CRC
+# retries for a 1 MiB kernel); 57600 should give ~4.5 KB/s (estimate).
+baud=57600 cbaud=9600
 while getopts b:c:h o; do
     case $o in b) baud=$OPTARG ;; c) cbaud=$OPTARG ;; *) usage ;; esac
 done
@@ -58,7 +60,7 @@ if [ "$baud" = "$cbaud" ]; then
 else
     rcmd="stty $baud; $rx; stty $cbaud"
 fi
-rcmd="L=7; grep -qw quiet /proc/cmdline && L=4; [ -r /proc/sys/kernel/printk ] && read L x < /proc/sys/kernel/printk; dmesg -n 1; $rcmd; dmesg -n \$L"
+rcmd="mkdir -p $(dirname "$remote"); L=7; grep -qw quiet /proc/cmdline && L=4; [ -r /proc/sys/kernel/printk ] && read L x < /proc/sys/kernel/printk; dmesg -n 1; $rcmd; dmesg -n \$L"
 # The marker is printed as XFER-END<n>=done (n = bytes received); the echoed
 # command line reads XFER-END"$n"=done, which does not match the pattern.
 rcmd="$rcmd; n=\$(wc -c < $part); head -c $size $part > $remote; rm -f $part; cat /tmp/rx.err; sha256sum $remote; echo XFER-END\"\$n\"=done"

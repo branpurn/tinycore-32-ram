@@ -1,0 +1,7 @@
+# tc32: map musl's default locale names onto Xlib's C locale
+POSIX			C
+C.UTF-8			C
+C.utf8			C
+POSIX:			C
+C.UTF-8:		C
+C.utf8:			C
