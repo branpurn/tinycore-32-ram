@@ -1,0 +1,23 @@
+#!/bin/sh
+# xautostart.tcz install script (/usr/local/tce.installed/xautostart).
+# tce-load runs it when onboot.lst loads the extension during rcS, so it is
+# the boot hook: it starts X on the local display (startx from Xfbdev.tcz)
+# in the background and returns at once. The ttyS0 root shell is untouched.
+# Not started when:
+#   - the command line has "notx" (extlinux label tc-text), or
+#   - the kernel has no Unix sockets (stock tc32 kernel: labels tc, rescue).
+# Log: /tmp/xautostart.log (startx's own output; Xfbdev logs /tmp/Xfbdev.log)
+# shellcheck disable=SC2013 # words (boot codes), not lines
+for c in $(cat /proc/cmdline); do
+    [ "$c" = notx ] && { echo "xautostart: notx on the command line, X not started"; exit 0; }
+done
+[ -d /proc/net ] || { echo "xautostart: kernel $(uname -r) has no Unix sockets, X not started"; exit 0; }
+echo "xautostart: starting X on the local display (log /tmp/xautostart.log)"
+# A short pause lets rcS finish first (onboot.lst, bootlocal, the gettys).
+# rcS runs with PATH=/bin:/sbin:/usr/bin:/usr/sbin; startx, Xfbdev, jwm and
+# rxvt live in /usr/local/bin, so use the login PATH (/etc/profile).
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+HOME=/root
+export PATH HOME
+( sleep 5; exec startx ) < /dev/null > /tmp/xautostart.log 2>&1 &
+exit 0
