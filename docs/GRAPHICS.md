@@ -222,6 +222,40 @@ After a serial delivery `rm -r /mnt/sda1/gfx` frees the staging copies.
 itself. Leave X with the jwm menu entry **Exit X** (Alt+F1).
 `make test-gfx` runs this same `gfx-setup.sh` procedure in QEMU.
 
+### X by default (755C dual CF, `xautostart.tcz`)
+
+Verified on the real 755C (dual CF: boot on `sda1`, tce on `sdb2`). tc32
+has no backup/restore and `/opt` is in the RAM rootfs, so the only
+persistent boot hooks are `onboot.lst` and extensions: `tce-load` runs an
+extension's `/usr/local/tce.installed/<name>` script. `xautostart.tcz`
+([errata/755c/xautostart](../errata/755c/xautostart/xautostart), built by
+`errata/755c/mk-xautostart.sh`) is only that script: it starts `startx` in
+the background (log `/tmp/xautostart.log`) and returns, so rcS goes on and
+the ttyS0 root shell comes up as usual. It skips X when the command line
+has `notx`, or when the kernel has no Unix sockets (stock `vmlinuz`). rcS
+runs with `PATH=/bin:/sbin:/usr/bin:/usr/sbin`, so the script sets the
+login PATH itself (startx lives in `/usr/local/bin`).
+
+`gfx-setup.sh` assumes the tce dir is on the boot disk, so on the dual-CF
+layout do it by hand:
+
+1. `.tcz` files (Xlibs, Xfbdev, jwm, rxvt, modutils, fb-wd90c24,
+   trackpoint, xautostart) to `/mnt/sdb2/tce/optional/`, `vmlinuz.x` to
+   `/mnt/sda1/boot/`. With `send-file.sh`, receive into `/tmp` and `mv`
+   from there: receiving straight onto the CF failed with rx framing errors
+   (`bad block ones compl`) once about 60 KB had been written, while
+   receiving into RAM ran clean at ~1.93 KB/s.
+2. `printf 'Xfbdev.tcz\nxautostart.tcz\n' > /mnt/sdb2/tce/onboot.lst`
+   (Xfbdev first: it provides `startx`).
+3. `extlinux.conf`: `DEFAULT x`, plus labels `x` (`/boot/vmlinuz.x`) and
+   `tc-text` (same, with `notx` appended); see
+   [errata/755c/extlinux.conf.example](../errata/755c/extlinux.conf.example).
+
+Text-only boots: pick **tc-text** (graphics kernel, `notx`), **tc** (stock
+kernel, no Unix sockets) or **rescue** in the menu (Tab edits the line;
+`notx` works on any label). While X runs, the serial shell still works;
+jwm's **Exit X** returns the panel to text.
+
 ## 7. Caveats for the real hardware
 
 * wd90c24fb runs X on the 755C. It no longer has a trial period by
@@ -279,7 +313,8 @@ Measured on the real ThinkPad 755C (WD90C24A/A2, 486 DX4-100):
 - **Boot:** extlinux prints `boot:` after the SYSLINUX banner (TIMEOUT 30
   = 3 s). Automation must match that prompt, not the `reboot:` in the
   shutdown text (that once picked the default label). X does not start by
-  itself: run `startx`.
+  itself unless `xautostart.tcz` is in `onboot.lst` (section 6, "X by
+  default"); otherwise run `startx`.
 - **Speed:** shadow flush to video memory through PR0A banking ~8.6 MB/s
   (50.5 MB in 5.86 s). Damage + BITBLT works (Xfbdev log "damage, BITBLT
   copies, BITBLT fills to the driver"; "feels smoother"). With the rxvt

@@ -51,7 +51,8 @@ the real 755C.** Items marked *(unverified)* still need the hardware.
 | [build-floppy.sh](build-floppy.sh) | builds `out/tc755c-installer.img`, the 1.44 MB dual-CF installer floppy (reproducible; images are never committed) |
 | [install-dualcf.sh](install-dualcf.sh) | the installer on that floppy (`install-dualcf detect / prepare / finish`), busybox ash, uses `install-to-disk` for the master |
 | [host-send.sh](host-send.sh) | host side: send files to `sdb2:/incoming` over the serial console (XMODEM via `tools/send-file.sh`) plus a `SHA256SUMS` list |
-| [extlinux.conf.example](extlinux.conf.example) | menu.c32 boot menu: `tc` (default), `win98` (`chain.c32 hd1 1 swap`), `rescue` |
+| [extlinux.conf.example](extlinux.conf.example) | menu.c32 boot menu: `x` (default once the graphics stage is installed), `tc-text`, `tc`, `win98` (`chain.c32 hd1 1 swap`), `rescue` |
+| [xautostart/](xautostart/xautostart), [mk-xautostart.sh](mk-xautostart.sh) | `xautostart.tcz`: starts X at boot from `onboot.lst` (skipped with `notx` or on the stock kernel); see docs/GRAPHICS.md section 6 "X by default" |
 | [serial-getty.md](serial-getty.md), [repack-core-serial.sh](repack-core-serial.sh) | serial login on COM1: what tc32 already has, and how to add or change a ttyS0 getty in a `core.gz` / `core.xz` |
 | [installer.txt](installer.txt) | login banner on the installer floppy |
 | [test-qemu.py](test-qemu.py) | the QEMU test (`--full` = install end to end) |

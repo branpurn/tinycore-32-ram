@@ -35,7 +35,11 @@ SX=${SX:-$(command -v sx || command -v lsx || command -v lrzsz-sx || echo "$here
 size=$(stat -c %s "$file")
 sum=$(sha256sum "$file" | cut -d' ' -f1)
 tmp=$(mktemp -d); catpid=""
-trap 'exec 3>&-; [ -n "$catpid" ] && kill "$catpid" 2>/dev/null; rm -rf "$tmp"' EXIT INT TERM
+cleanup() { exec 3>&-; [ -n "$catpid" ] && kill "$catpid" 2>/dev/null; rm -rf "$tmp"; }
+# INT/TERM must also end the script (a bare cleanup trap would let it go on).
+trap cleanup EXIT
+trap 'cleanup; trap - EXIT; exit 130' INT
+trap 'cleanup; trap - EXIT; exit 143' TERM
 # XMODEM pads the last block with ^Z and busybox rx strips >= 3 trailing ^Z,
 # so the received size is not exact. Send a copy padded with zeros to a 1 KiB
 # multiple (at least one zero byte) and cut it back to $size with head -c.
@@ -66,6 +70,13 @@ rcmd="mkdir -p $(dirname "$remote"); L=7; grep -qw quiet /proc/cmdline && L=4; [
 # The marker is printed as XFER-END<n>=done (n = bytes received); the echoed
 # command line reads XFER-END"$n"=done, which does not match the pattern.
 rcmd="$rcmd; n=\$(wc -c < $part); head -c $size $part > $remote; rm -f $part; cat /tmp/rx.err; sha256sum $remote; echo XFER-END\"\$n\"=done"
+# The tc32 console drops input lines longer than ~512 characters (seen on
+# the 755C): refuse rather than send a command that is silently cut off.
+# Long REMOTE_PATHs are the usual cause; send to /tmp or a short symlink.
+if [ ${#rcmd} -gt 480 ]; then
+    echo "send-file: remote command is ${#rcmd} chars (console limit ~512): use a shorter REMOTE_PATH, e.g. /tmp/$(basename "$remote")" >&2
+    exit 1
+fi
 echo "send-file: $file ($size bytes) -> $remote, console $cbaud, transfer $baud baud"
 printf '\025%s\r' "$rcmd" >&3         # ^U clears anything half-typed at the prompt
 # Let the command echo back at console speed while tc32 switches its UART.

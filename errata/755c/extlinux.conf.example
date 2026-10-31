@@ -16,15 +16,31 @@
 SERIAL 0 9600
 UI menu.c32
 MENU TITLE ThinkPad 755C
-DEFAULT tc
+DEFAULT x
 PROMPT 1
 TIMEOUT 50
 
+# After the graphics stage (docs/GRAPHICS.md section 6, "X by default"):
+# the graphics kernel plus xautostart.tcz in onboot.lst start X on the
+# panel. The serial root shell on ttyS0 stays up either way.
+# Without the graphics stage, keep DEFAULT tc and drop x and tc-text.
+LABEL x
+  MENU LABEL Tiny Core + X (tc755x kernel, tce on sdb2)
+  KERNEL /boot/vmlinuz.x
+  APPEND initrd=/boot/core.xz floppy=thinkpad atkbd.xlate=2 tce=sdb2 console=tty0 console=ttyS0,9600n8
+
+# Same kernel and extensions, but xautostart sees "notx" and skips X.
+LABEL tc-text
+  MENU LABEL Tiny Core, text only (tc755x kernel, notx)
+  KERNEL /boot/vmlinuz.x
+  APPEND initrd=/boot/core.xz floppy=thinkpad atkbd.xlate=2 tce=sdb2 console=tty0 console=ttyS0,9600n8 notx
+
 # Tiny Core with extensions, home and opt on the slave's ext2 "tcdata".
 # tc32's core.xz: its rcS understands tce=<device> only (no LABEL=, home=,
-# opt=), so name the partition:
+# opt=), so name the partition. The stock kernel has no Unix sockets, so X
+# never starts here (xautostart says so on the console).
 LABEL tc
-  MENU LABEL Tiny Core (tce on sdb2 tcdata)
+  MENU LABEL Tiny Core, stock kernel, no X (tce on sdb2)
   KERNEL /boot/vmlinuz
   APPEND initrd=/boot/core.xz floppy=thinkpad atkbd.xlate=2 tce=sdb2 console=tty0 console=ttyS0,9600n8
 
