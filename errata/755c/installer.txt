@@ -1,0 +1,9 @@
+
+tc32 INSTALLER, ThinkPad 755C dual-CF edition (errata/755c).
+  install-dualcf detect     show the IDE master (sda) and slave (sdb), write nothing
+  install-dualcf -n prepare show the plan, write nothing
+  install-dualcf prepare    ERASE both cards (asks you to type "ERASE sda sdb")
+  install-dualcf finish     install files received into sdb2:/incoming (sha256 checked)
+  install-to-disk -h        the stock single-disk installer is still here
+Serial file transfer: rx FILE (XMODEM); see errata/755c/INSTALL.md.
+

@@ -1,0 +1,51 @@
+# ThinkPad 755C dual-CF boot menu: /boot/extlinux/extlinux.conf on the
+# master card (sda1, ext2 "TC32"). install-dualcf writes a file like this.
+#
+# IMPORTANT: menu.c32 and chain.c32 (and any other .c32 module) must come from
+# the SAME syslinux version as the installed extlinux/ldlinux.sys. tc32
+# installs syslinux 4.07 (versions.env); 4.07 modules are self-contained, but
+# 5.x and later also need ldlinux.c32, libcom32.c32 and libutil.c32, and a
+# mismatched module fails with "Not a COM32R image" or hangs.
+# Copy menu.c32 and chain.c32 from the syslinux-4.07 tarball
+# (com32/menu/menu.c32, com32/chain/chain.c32) into /boot/extlinux/.
+#
+# Disk names: the kernel's libata driver (pata_legacy) calls the IDE master
+# sda and the slave sdb. hda/hdb do not exist on this kernel.
+# BIOS disk numbers (chain.c32): hd0 = master, hd1 = slave.
+
+SERIAL 0 9600
+UI menu.c32
+MENU TITLE ThinkPad 755C
+DEFAULT tc
+PROMPT 1
+TIMEOUT 50
+
+# Tiny Core with extensions, home and opt on the slave's ext2 "tcdata".
+# tc32's core.xz: its rcS understands tce=<device> only (no LABEL=, home=,
+# opt=), so name the partition:
+LABEL tc
+  MENU LABEL Tiny Core (tce on sdb2 tcdata)
+  KERNEL /boot/vmlinuz
+  APPEND initrd=/boot/core.xz floppy=thinkpad atkbd.xlate=2 tce=sdb2 console=tty0 console=ttyS0,9600n8
+
+# Stock Tiny Core core.gz form (tc-config/tce-setup resolve LABEL= via blkid).
+# Stock core.gz needs about 46 MB of RAM, more than a 755C can hold, so this
+# is kept for reference and for other machines; see README.md.
+#LABEL tc
+#  KERNEL /boot/vmlinuz
+#  APPEND initrd=/boot/core.gz tce=LABEL=tcdata home=LABEL=tcdata opt=LABEL=tcdata console=tty0 console=ttyS0,115200
+
+# Windows 98 SE on the slave's first partition (sdb1, FAT32, active).
+# "swap" makes the slave answer as BIOS disk 0x80 so Win98 boots as C:.
+LABEL win98
+  MENU LABEL Windows 98 SE (sdb1)
+  COM32 chain.c32
+  APPEND hd1 1 swap
+
+# Rescue: fallback extensions on the master, ignore saved state.
+# ("base" is a stock Tiny Core option; tc32 has no restore step, so
+# norestore is accepted and ignored there.)
+LABEL rescue
+  MENU LABEL Rescue (tce on sda1, no restore)
+  KERNEL /boot/vmlinuz
+  APPEND initrd=/boot/core.xz floppy=thinkpad atkbd.xlate=2 tce=sda1 norestore console=tty0 console=ttyS0,9600n8
