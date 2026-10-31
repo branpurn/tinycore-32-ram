@@ -112,6 +112,11 @@ in `rootfs/etc/inittab`.
 
 ## Install onto the IDE disk / CF card
 
+For a dual CompactFlash adapter (tc32 on the master card; Windows 98 SE and
+the tce store on the slave) with a menu.c32 boot menu, see
+[errata/755c/](errata/755c/README.md). It has its own installer floppy
+(`errata/755c/build-floppy.sh`) and step-by-step guide.
+
 ```sh
 dd if=out/installer.img of=/dev/fdX bs=512 conv=fsync    # boot it, then on the 755C:
 install-to-disk -n /dev/sda      # dry run
@@ -194,6 +199,7 @@ tools/send-file.sh    host side of the serial (XMODEM) file transfer
 tests/                QEMU harness, test-disk builder, runners (run.sh, run-install.sh)
 docs/FEASIBILITY.md   research, budgets, risks, decisions
 docs/INSTALL.md       disk installer, layout, serial transfer, 755C checklist
+errata/755c/           one specific 755C build: dual CF (tc32 + Win98 SE), boot menu, dual-CF installer floppy
 ```
 
 ## License
