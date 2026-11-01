@@ -101,6 +101,12 @@ old estimates: use the 115200 column (1.9 KB/s) for all three rates.
 | `trackpoint.tcz` | `make gfx-755c` | 20480 | | 0m11s | 0m05s | 0m06s |
 | **minimum set** (above) | | **2732544** | | **~24 min** | **~11 min** | **~14 min** |
 | `Xaw-apps.tcz` (optional: Xt/Xaw stack, xclock, xcalc, xeyes) | `make gfx` | 352256 | 893572 | 3m05s | 1m18s | 1m46s |
+| `pcmcia-755c.tcz` (optional: PC Card, CF cards and modems) | `make gfx-755c` | 49152 | | 0m26s | 0m11s | 0m15s |
+
+`pcmcia-755c.tcz` needs `modutils.tcz` (its `.dep`), but `tce-load` here
+does not read `.dep` files: list `modutils.tcz` before it in `onboot.lst`.
+Its load hook gives the two ISA sockets their I/O and memory windows and
+prints one line; see [errata/755c/README.md](../errata/755c/README.md#pc-card-verified).
 
 `tools/send-gfx.sh -n` prints the same plan for any `-b`. Per-file
 overhead (command echo at 9600, rx start) is ~4 s.

@@ -4,13 +4,13 @@
 #                                      built in + AF_UNIX -> out/gfx/bzImage
 #   scripts/build-gfx-kernel.sh 755c   the 755C kernel "6.18.57-tc755x": the
 #       thinkpad-755c-drivers (tc755) kernel + its modules/.tcz (wd90c24fb,
-#       trackpoint, modutils, ...) rebuilt with AF_UNIX. Output: out/gfx/755c/
+#       trackpoint, modutils, pcmcia-755c, ...) rebuilt with AF_UNIX. Output: out/gfx/755c/
 #       {vmlinuz.x, *.tcz}. Uses a pinned export of the tc755 repo (TC755_GIT:
 #       local clone or URL), with its own vermagic so the stock tc755 .tcz
 #       (no NET) can never be loaded into it by mistake.
 . "$(dirname "$0")/common.sh"
 TC755_GIT=${TC755_GIT:-$( [ -d "$TOP/../thinkpad-755c-drivers/.git" ] && cd "$TOP/../thinkpad-755c-drivers" && pwd || echo https://github.com/branpurn/thinkpad-755c-drivers)}
-TC755_COMMIT=${TC755_COMMIT:-22164b2}
+TC755_COMMIT=${TC755_COMMIT:-ca61e92}
 case ${1:-test} in
 test)
     KERNEL_OBJ="$BUILD/kernel-gfxtest" KERNEL_OUT="$OUT/gfx" \
@@ -28,7 +28,7 @@ test)
     make -C "$W" TC32_DIR="$TOP" ADDON_FRAGMENTS="modules drivers xnet" kernel tcz
     D="$OUT/gfx/755c"; rm -rf "$D"; mkdir -p "$D"
     cp "$W/out/bzImage" "$D/vmlinuz.x"
-    for e in modutils fb-wd90c24 fb-vga16 trackpoint wd90c24-probe apm-tools; do
+    for e in modutils fb-wd90c24 fb-vga16 trackpoint wd90c24-probe apm-tools pcmcia-755c; do
         cp "$W/out/tcz/$e.tcz" "$D/"; [ -f "$W/out/tcz/$e.tcz.dep" ] && cp "$W/out/tcz/$e.tcz.dep" "$D/"
     done
     ( cd "$D" && sha256sum vmlinuz.x *.tcz > sha256.txt )

@@ -161,7 +161,7 @@ Two important kernel fixes came out of this testing:
   syscalls. Without them busybox `init` busy-spins and ignores
   poweroff/reboot.
 
-## 4b. Console setup (Brandon's decision, Phase 1b)
+## 4b. Console setup (owner's decision, Phase 1b)
 
 * The default syslinux entry autoboots after 3 s with
   `console=tty0 console=ttyS0,9600n8`. ttyS0 is listed last, so it is
@@ -198,7 +198,7 @@ Two important kernel fixes came out of this testing:
   mount fine, but their programs need TC's glibc/libs (from `core.gz`),
   which won't fit on the floppy. See decision D2.
 
-## 6. Decision points for Brandon
+## 6. Decision points for the owner
 
 * **D1 – Scope of "Tiny Core".** Is TC's *mechanism* (boot codes,
   tce dir, `.tcz` loop+symlink, onboot.lst, bootlocal) enough, or do you
