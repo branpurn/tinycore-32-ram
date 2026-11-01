@@ -240,13 +240,16 @@ login PATH itself (startx lives in `/usr/local/bin`).
 layout do it by hand:
 
 1. `.tcz` files (Xlibs, Xfbdev, jwm, rxvt, modutils, fb-wd90c24,
-   trackpoint, xautostart) to `/mnt/sdb2/tce/optional/`, `vmlinuz.x` to
-   `/mnt/sda1/boot/`. With `send-file.sh`, receive into `/tmp` and `mv`
-   from there: receiving straight onto the CF failed with rx framing errors
-   (`bad block ones compl`) once about 60 KB had been written, while
-   receiving into RAM ran clean at ~1.93 KB/s.
-2. `printf 'Xfbdev.tcz\nxautostart.tcz\n' > /mnt/sdb2/tce/onboot.lst`
-   (Xfbdev first: it provides `startx`).
+   trackpoint, xautostart, Xaw-apps) to `/mnt/sdb2/tce/optional/`,
+   `vmlinuz.x` to `/mnt/sda1/boot/`. `Xaw-apps.tcz` holds xclock, xcalc
+   and xeyes: without it jwm's Clock, Calc and Eyes entries do nothing.
+   With `send-file.sh`, receive into `/tmp` and `mv` from there:
+   receiving straight onto the CF failed with rx framing errors (`bad
+   block ones compl`) once about 60 KB had been written, while receiving
+   into RAM ran clean at ~1.93 KB/s.
+2. `printf 'Xfbdev.tcz\nXaw-apps.tcz\nxautostart.tcz\n' > /mnt/sdb2/tce/onboot.lst`
+   (Xfbdev first: it provides `startx`). On a running system, add
+   `Xaw-apps.tcz` with `tce-load -i Xaw-apps` plus a line in `onboot.lst`.
 3. `extlinux.conf`: `DEFAULT x`, plus labels `x` (`/boot/vmlinuz.x`) and
    `tc-text` (same, with `notx` appended); see
    [errata/755c/extlinux.conf.example](../errata/755c/extlinux.conf.example).

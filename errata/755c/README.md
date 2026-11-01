@@ -34,7 +34,8 @@ the real 755C.** Items marked *(unverified)* still need the hardware.
   tc32 boots from (`sda1`) lies inside it. `sdb1` starts at 1 MiB, so the
   Win98 boot sector and `IO.SYS` are in reach, but the rest of the 2 GiB
   partition is not. Windows 98 then needs its own 32-bit disk driver
-  (`ESDI_506.PDR`) to reach the rest. Partition type `0b` (FAT32, CHS) is
+  (`ESDI_506.PDR`) to reach the rest; [WIN98-INSTALL.md](WIN98-INSTALL.md#bios-reach-504-mib-and-the-2-gib-partition)
+  tests this and keeps DOS below the limit until it is known. Partition type `0b` (FAT32, CHS) is
   the default because this BIOS has no INT 13h extensions *(unverified)*.
   `install-dualcf -t 0c` writes `0c` (FAT32 LBA) instead.
 * **RAM:** stock Tiny Core `core.gz` needs about 46 MB, and the 755C holds
@@ -52,6 +53,7 @@ the real 755C.** Items marked *(unverified)* still need the hardware.
 | [install-dualcf.sh](install-dualcf.sh) | the installer on that floppy (`install-dualcf detect / prepare / finish`), busybox ash, uses `install-to-disk` for the master |
 | [host-send.sh](host-send.sh) | host side: send files to `sdb2:/incoming` over the serial console (XMODEM via `tools/send-file.sh`) plus a `SHA256SUMS` list |
 | [extlinux.conf.example](extlinux.conf.example) | menu.c32 boot menu: `x` (default once the graphics stage is installed), `tc-text`, `tc`, `win98` (`chain.c32 hd1 1 swap`), `rescue` |
+| [WIN98-INSTALL.md](WIN98-INSTALL.md), [win98/](win98/) | Windows 98 SE on `sdb1`, driven over serial: the W98SERIAL boot floppy (`mk-win98-floppy.sh`, DOS console on COM1), unattended `MSBATCH.INF` (`mk-msbatch.sh`), BIOS reach probes (`mk-probes.sh`) and the `win98s` (`setbpb`) menu entry. Tiny Core stays the default |
 | [xautostart/](xautostart/xautostart), [mk-xautostart.sh](mk-xautostart.sh) | `xautostart.tcz`: starts X at boot from `onboot.lst` (skipped with `notx` or on the stock kernel); see docs/GRAPHICS.md section 6 "X by default" |
 | [serial-getty.md](serial-getty.md), [repack-core-serial.sh](repack-core-serial.sh) | serial login on COM1: what tc32 already has, and how to add or change a ttyS0 getty in a `core.gz` / `core.xz` |
 | [installer.txt](installer.txt) | login banner on the installer floppy |
