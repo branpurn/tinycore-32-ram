@@ -44,6 +44,12 @@ for f in "$HERE"/floppy/*; do sed 's/\r*$/\r/' "$f" > "$T/$(basename "$f")"; don
 #    menu, no RAM drive), add the tools and batch files. The CD-ROM
 #    drivers and EBD.CAB stay; they are simply not loaded.
 mattrib -i "$T/f.img" -r -s -h ::CONFIG.SYS ::AUTOEXEC.BAT 2>/dev/null || true
+# JO.SYS is the CD's "Boot from Hard Disk / Boot from CD-ROM" menu; IO.SYS
+# runs it first when present and it defaults to the hard disk. Remove it so
+# the floppy goes straight to DOS (and the COM1 console) with no input.
+mattrib -i "$T/f.img" -r -s -h ::JO.SYS 2>/dev/null || true
+mdel -i "$T/f.img" ::JO.SYS 2>/dev/null || true
+mdir -a -i "$T/f.img" ::JO.SYS >/dev/null 2>&1 && die "JO.SYS still in image"
 for f in "$T"/x/* "$T"/CONFIG.SYS "$T"/AUTOEXEC.BAT "$T"/*.BAT "$T"/GEO.SCR "$T"/README.TXT; do
     n=$(basename "$f" | tr a-z A-Z)
     mcopy -o -m -i "$T/f.img" "$f" "::$n" || die "mcopy $n"
