@@ -1,0 +1,23 @@
+a 100
+mov ax,0800
+mov dx,0080
+int 13
+int 3
+
+g=100
+a 100
+mov ax,0800
+mov dx,0081
+int 13
+int 3
+
+g=100
+a 100
+mov ax,4100
+mov bx,55aa
+mov dx,0081
+int 13
+int 3
+
+g=100
+q

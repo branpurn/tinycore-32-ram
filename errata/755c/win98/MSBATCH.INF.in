@@ -1,0 +1,52 @@
+; Unattended Windows 98 SE Setup for the ThinkPad 755C (errata/755c).
+; mk-msbatch.sh fills in the product key and writes this, with CRLF line
+; ends, as \WIN98\MSBATCH.INF on sdb1. Keys: Windows 98 Resource Kit,
+; Appendix D (Msbatch.inf parameters), and the Batch 98 tool on the CD
+; (\tools\reskit\batch: ShowEula, ProductKey, Skip.PCMCIA.Wizard).
+; Run from DOS:  SETUP.EXE C:\WIN98\MSBATCH.INF /IS /IQ /IE /IM /IR /IV /NF
+
+[BatchSetup]
+Version=3.0 (32-bit)
+
+[Version]
+Signature="$CHICAGO$"
+AdvancedINF=2.5
+
+[Setup]
+; Express=1: use only these settings, no questions.
+Express=1
+InstallDir="C:\WINDOWS"
+ChangeDir=0
+NoDirWarn=1
+; 1 = Typical
+InstallType=1
+ProductKey="@WIN98SE_PRODUCT_KEY@"
+; No emergency startup disk, no license page, no uninstall backup.
+EBD=0
+ShowEula=0
+Uninstall=0
+; Batch 98 default (the card has no earlier Windows to upgrade).
+CleanBoot=0
+Devicepath=0
+; Reboot without waiting for a key (Batch 98's "automatically reboot").
+NoPrompt2Boot=1
+OptionalComponents=0
+TimeZone="Eastern"
+
+[NameAndOrg]
+Name="ThinkPad 755C"
+Org=""
+Display=0
+
+[Network]
+ComputerName="THINKPAD755C"
+Workgroup="WORKGROUP"
+Description="ThinkPad 755C"
+Display=0
+
+[Install]
+AddReg=Skip.PCMCIA.Wizard
+
+; The 755C has PC Card slots: skip the PC Card wizard in batch mode.
+[Skip.PCMCIA.Wizard]
+HKLM,System\CurrentControlSet\Services\Class\PCMCIA,SkipWizardForBatchSetup,,1

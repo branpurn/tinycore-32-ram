@@ -58,6 +58,14 @@ LABEL win98
   COM32 chain.c32
   APPEND hd1 1 swap
 
+# Same, with chain.c32 fixing the boot sector's geometry, hidden sectors and
+# drive number in memory. Added (and made DEFAULT only during Setup) by
+# WIN98-INSTALL.md; DEFAULT goes back to x afterwards.
+#LABEL win98s
+#  MENU LABEL Windows 98 SE (sdb1, setbpb)
+#  COM32 chain.c32
+#  APPEND hd1 1 swap setbpb
+
 # Rescue: fallback extensions on the master, ignore saved state.
 # ("base" is a stock Tiny Core option; tc32 has no restore step, so
 # norestore is accepted and ignored there.)

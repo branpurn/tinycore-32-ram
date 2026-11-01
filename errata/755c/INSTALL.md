@@ -156,6 +156,13 @@ the real 755C.
 
 None of this part has been tested, in QEMU or on the 755C.
 
+> **Superseded by [WIN98-INSTALL.md](WIN98-INSTALL.md)** for the 755C:
+> a boot floppy with its console on COM1, an unattended `MSBATCH.INF`,
+> Setup with `/IR` (MBR left alone), a BIOS reach check, and a temporary
+> `DEFAULT win98s` so Setup's restarts need no menu picks. It skips
+> step 15's `FORMAT C: /S`, which would also erase a `\WIN98` folder
+> copied in step 16. Steps 15 to 17 are kept below for reference.
+
 15. Format sdb1 from DOS. The placeholder FAT32 from `mkfs.vfat` has no DOS
     boot code. Boot the **Win98 SE boot floppy** in the 755C, without CD
     support. sda has no DOS partition, so DOS should give **C:** to sdb1.
