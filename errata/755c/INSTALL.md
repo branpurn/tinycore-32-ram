@@ -69,8 +69,10 @@ the real 755C.
    real cards)**
 7. Dry run: `tc# install-dualcf -n prepare` prints the plan and writes
    nothing. Defaults: `sda1` 256 MB boot plus `sda2` 64 MB swap; `sdb1`
-   2048 MB FAT32 type `0b`, active; `sdb2` the rest of the card as ext2
-   `tcdata`. Change them with `-s`, `-w`, `-f` and `-t 0c`.
+   FAT32 type `0b`, active, up to the last sector the BIOS reaches (`-f
+   max`: 7544 MB with the slave geometry the 755C BIOS reports,
+   `-g 1022/240/63`); `sdb2` the rest of the card as ext2 `tcdata`.
+   Change them with `-s`, `-w`, `-f MB`, `-g C/H/S` and `-t 0c`.
 
 ## C. Partition and format both cards
 
@@ -152,9 +154,10 @@ the real 755C.
     In QEMU, the menu and the default `tc` boot were checked. **On the
     real 755C, the menu rendering on VGA and serial is unverified.**
 
-## E. Windows 98 SE on sdb1 (unverified)
+## E. Windows 98 SE on sdb1
 
-None of this part has been tested, in QEMU or on the 755C.
+Steps 15 to 17 were never run as written. What did install and boot Win98
+SE on the real 755C is in [WIN98-INSTALL.md](WIN98-INSTALL.md#what-worked-on-the-real-755c).
 
 > **Superseded by [WIN98-INSTALL.md](WIN98-INSTALL.md)** for the 755C:
 > a boot floppy with its console on COM1, an unattended `MSBATCH.INF`,
@@ -187,7 +190,9 @@ None of this part has been tested, in QEMU or on the 755C.
 18. Check from Linux that Windows did not touch tcdata: boot `tc`, then
     `tc# fdisk -l /dev/sdb` and `tc# ls /mnt/sdb2/tce`.
 
-Known caveats for Win98 **(unverified)**:
+Known caveats for Win98 (written before the hardware; the BIOS reach
+turned out to be about 7.9 GB, and the boot entry that works is grub4dos
+`w98n`, see WIN98-INSTALL.md):
 - The 755C BIOS may only reach the first 504 MB of each card. Win98's
   protected-mode IDE driver handles the rest. If you see "Invalid system
   disk" or a hang after `win98`, try `APPEND hd1 1 swap setbpb` in
@@ -226,8 +231,7 @@ QEMU checks, with `errata/755c/test-qemu.py --full`:
 Not verified (real 755C hardware):
 - floppy boot time, and the detection of the real CF cards;
 - `mke2fs` time on 128 GB;
-- BIOS access to sdb1 (504 MB limit, `0b` vs `0c`);
 - menu.c32 on the 755C's VGA and serial;
-- all of part E (Win98 SE install and boot, and whether Windows Setup
-  overwrites the master MBR);
+- whether Windows Setup overwrites the master MBR (part E was done with
+  `/IR`, see WIN98-INSTALL.md);
 - the speeds above 9600 for the console.

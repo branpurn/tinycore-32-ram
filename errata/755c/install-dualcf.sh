@@ -2,7 +2,7 @@
 # install-dualcf: set up the ThinkPad 755C dual-CF layout from the tc32
 # installer floppy. busybox ash; builds on install-to-disk. See INSTALL.md.
 #
-#   install-dualcf [-b BAUD] [-s MB] [-w MB] [-f MB] [-t HEX] [-n] detect|prepare|finish
+#   install-dualcf [-b BAUD] [-s MB] [-w MB] [-f MB] [-g C/H/S] [-t HEX] [-n] detect|prepare|finish
 #     detect   list the IDE disks (master/slave), change nothing
 #     prepare  ERASE both cards: master = tc32 boot disk (install-to-disk),
 #              slave = p1 FAT32 for Win98 SE + p2 ext2 LABEL=tcdata
@@ -10,8 +10,9 @@
 #              files, write the menu extlinux.conf (tc / win98 / rescue)
 #     -b BAUD  serial console speed in extlinux.conf (default 9600)
 #     -s MB    master boot partition (default 256)  -w MB  master swap (default 64)
-#     -f MB    slave FAT32 partition (default 2048) -t HEX FAT type (default 0b)
-#     -n       dry run (detect + plan only)
+#     -f MB    slave FAT32 partition, or max = up to the BIOS limit (default max)
+#     -g C/H/S slave BIOS geometry (default 1022/240/63, read on a real 755C)
+#     -t HEX   FAT type (default 0b)   -n  dry run (detect + plan only)
 #
 # libata (pata_legacy) names the IDE master sda and the slave sdb; the old
 # hda/hdb names do not exist on this kernel. Nothing is written before the
@@ -19,20 +20,26 @@
 PATH=/usr/sbin:/usr/bin:/sbin:/bin; export PATH
 set -u
 SHARE=/usr/share/tc32
-BAUD=9600 P1MB=256 SWAPMB=64 FATMB=2048 FATTYPE=0b DRY=""
+BAUD=9600 P1MB=256 SWAPMB=64 FATMB=max GEOM=1022/240/63 FATTYPE=0b DRY=""
 BOOTMNT=/mnt/tc32-target DATAMNT=/mnt/tcdata
 die() { echo "install-dualcf: $*" >&2; exit 1; }
-usage() { sed -n '5,15s/^# \{0,1\}//p' "$0"; exit 2; }
-while getopts b:s:w:f:t:nh o; do
+usage() { sed -n '5,16s/^# \{0,1\}//p' "$0"; exit 2; }
+while getopts b:s:w:f:g:t:nh o; do
     case $o in
         b) BAUD=$OPTARG ;; s) P1MB=$OPTARG ;; w) SWAPMB=$OPTARG ;;
-        f) FATMB=$OPTARG ;; t) FATTYPE=$OPTARG ;; n) DRY=1 ;; *) usage ;;
+        f) FATMB=$OPTARG ;; g) GEOM=$OPTARG ;; t) FATTYPE=$OPTARG ;; n) DRY=1 ;; *) usage ;;
     esac
 done
 shift $((OPTIND - 1))
 [ $# -eq 1 ] || usage
 CMD=$1
-case $BAUD$P1MB$SWAPMB$FATMB in *[!0-9]*) die "numbers only for -b/-s/-w/-f" ;; esac
+case $BAUD$P1MB$SWAPMB${FATMB#max} in *[!0-9]*) die "numbers only for -b/-s/-w/-f" ;; esac
+# Slave BIOS geometry (cylinders/heads/sectors), as INT 13h AH=08 reports it
+case $GEOM in [0-9]*/[0-9]*/[0-9]*) ;; *) die "-g: C/H/S, e.g. 1022/240/63" ;; esac
+GC=${GEOM%%/*} GS=${GEOM##*/} GH=${GEOM#*/}; GH=${GH%/*}
+case $GC$GH$GS in *[!0-9]*) die "-g: C/H/S, e.g. 1022/240/63" ;; esac
+[ "$GC" -le 1024 ] && [ "$GH" -ge 1 ] && [ "$GH" -le 256 ] && [ "$GS" -ge 1 ] && [ "$GS" -le 63 ] \
+    || die "-g: C up to 1024, H 1-256, S 1-63"
 case $FATTYPE in 0b|0c|0B|0C) ;; *) die "-t: 0b (FAT32 CHS) or 0c (FAT32 LBA)" ;; esac
 [ "$(id -u)" = 0 ] || die "must run as root"
 
@@ -62,9 +69,13 @@ detect() {
 # shellcheck disable=SC2059 # octal escape built on purpose
 oct() { for b; do printf "\\$(printf %03o "$b")"; done; }
 le32() { oct $(($1 & 255)) $(($1 >> 8 & 255)) $(($1 >> 16 & 255)) $(($1 >> 24 & 255)); }
+# LBA -> the 3 CHS bytes of a partition entry (head, sector + cylinder bits
+# 8-9, cylinder bits 0-7) in the slave's BIOS geometry, which is what DOS
+# and the FAT32 (0b) boot code use. Past cylinder 1023 it is 1023/H-1/S.
 chs() {
-    c=$(($1 / 1008)) h=$(($1 / 63 % 16)) s=$(($1 % 63 + 1))
-    if [ "$c" -gt 1023 ]; then oct 254 255 255; else oct "$h" $((s | (c >> 2 & 192))) $((c & 255)); fi
+    c=$(($1 / (GH * GS))) h=$(($1 / GS % GH)) s=$(($1 % GS + 1))
+    if [ "$c" -gt 1023 ]; then c=1023 h=$((GH - 1)) s=$GS; fi
+    oct "$h" $((s | (c >> 2 & 192))) $((c & 255))
 }
 part() { oct "$1"; chs "$3"; oct "$2"; chs $(($3 + $4 - 1)); le32 "$3"; le32 "$4"; }
 
@@ -119,13 +130,18 @@ case $CMD in
 detect) exit 0 ;;
 prepare)
     SEC=$(cat "/sys/block/$SLAVE/size")
-    S1=2048 N1=$((FATMB * 2048)); S2=$((S1 + N1)); S2=$(( (S2 + 2047) / 2048 * 2048 ))
+    # max: sdb1 ends at the last sector INT 13h reaches (C x H x S), so DOS
+    # and real-mode Windows can read all of C:.
+    S1=2048
+    if [ "$FATMB" = max ]; then N1=$((GC * GH * GS - S1)); else N1=$((FATMB * 2048)); fi
+    [ "$N1" -ge $((64 * 2048)) ] || die "-f/-g: the FAT32 partition would be under 64 MB"
+    S2=$((S1 + N1)); S2=$(( (S2 + 2047) / 2048 * 2048 ))
     N2=$((SEC - S2))
-    [ "$N2" -ge $((64 * 2048)) ] || die "/dev/$SLAVE too small for ${FATMB} MB FAT32 + tcdata"
+    [ "$N2" -ge $((64 * 2048)) ] || die "/dev/$SLAVE too small for $((N1 / 2048)) MB FAT32 + tcdata"
     echo
     echo "Plan:"
     echo "  /dev/$MASTER  install-to-disk -s $P1MB -w $SWAPMB: ${MASTER}1 ext2 TC32 boot + extlinux + MBR, ${MASTER}2 swap"
-    echo "  /dev/$SLAVE  ${SLAVE}1 $FATMB MB FAT32 (type $FATTYPE, active) for Win98 SE"
+    echo "  /dev/$SLAVE  ${SLAVE}1 $((N1 / 2048)) MB FAT32 (type $FATTYPE, active, CHS as $GEOM) for Win98 SE"
     echo "              ${SLAVE}2 $((N2 / 2048)) MB ext2 LABEL=tcdata (tce/ home/ opt/ incoming/)"
     install-to-disk -n -s "$P1MB" -w "$SWAPMB" "/dev/$MASTER" >/dev/null || die "install-to-disk dry run failed"
     [ -n "$DRY" ] && { echo "Dry run (-n): nothing written."; exit 0; }

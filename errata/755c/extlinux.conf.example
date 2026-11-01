@@ -51,7 +51,20 @@ LABEL tc
 #  KERNEL /boot/vmlinuz
 #  APPEND initrd=/boot/core.gz tce=LABEL=tcdata home=LABEL=tcdata opt=LABEL=tcdata console=tty0 console=ttyS0,115200
 
-# Windows 98 SE on the slave's first partition (sdb1, FAT32, active).
+# Windows 98 SE on the slave's first partition (sdb1, FAT32, active), as it
+# boots on the real 755C: grub4dos loads IO.SYS straight from sdb1, with no
+# drive swap (the master has no FAT partition, so sdb1 is C: anyway).
+# grub.exe comes from a grub4dos release (not built by tc32); copy it to
+# /boot on sda1. The entry used on the 755C also sets grub4dos's terminal
+# to COM1 first, which is optional. Why not a swap: WIN98-INSTALL.md,
+# "What worked on the real 755C".
+LABEL w98n
+  MENU LABEL Windows 98 SE (sdb1, grub4dos, no drive swap)
+  KERNEL /boot/grub.exe
+  APPEND --config-file="root (hd1,0);chainloader /io.sys;boot"
+
+# The original plan, still written by install-dualcf (it needs no grub.exe);
+# superseded by w98n on the 755C.
 # "swap" makes the slave answer as BIOS disk 0x80 so Win98 boots as C:.
 LABEL win98
   MENU LABEL Windows 98 SE (sdb1)
