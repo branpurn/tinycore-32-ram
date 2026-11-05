@@ -1,0 +1,46 @@
+#!/bin/sh
+# tc32-s6d rcS: S6d separate-floppy variant of rootfs/etc/init.d/rcS.
+# No fdisk/swapon/awk (busybox-s6d tier1+2+3 drops). Boot APPEND includes noswap.
+# Supported boot codes: tce=... noswap norestore host=NAME quiet
+PATH=/bin:/sbin:/usr/bin:/usr/sbin; export PATH
+mkdir -p /dev/pts /tmp /mnt /run /var/run /var/log /tmp/tce/optional /tmp/tcloop /usr/local/tce.installed
+chmod 1777 /tmp
+mount -t tmpfs -o size=25% tmpfs /tmp 2>/dev/null || true
+hostname box
+
+TCE="" NOSWAP="" QUIET=""
+for c in $(cat /proc/cmdline); do
+    case $c in
+        tce=*) TCE=${c#tce=} ;;
+        noswap) NOSWAP=1 ;;
+        host=*) hostname "${c#host=}" ;;
+        quiet) QUIET=1 ;;
+    esac
+done
+say() { [ -n "$QUIET" ] || echo "$@"; }
+
+# MemTotal without awk (dropped in busybox-s6d)
+mem=$(sed -n 's/^MemTotal:[[:space:]]*\([0-9][0-9]*\).*/\1/p' /proc/meminfo)
+say "tc32-s6d: $(uname -r) $(uname -m), ${mem:-?} kB RAM"
+
+# Swap probe omitted: no fdisk/swapon applets on this floppy.
+say "tc32-s6d: noswap path (no swap applets)"
+
+# Extension dir (TC layout: /etc/sysconfig/tcedir -> <mount>/tce)
+TCEDIR=/tmp/tce
+if [ -n "$TCE" ]; then
+    dev=${TCE%%/*}; dev=${dev#/dev/}
+    mkdir -p "/mnt/$dev"
+    if mount "/dev/$dev" "/mnt/$dev" 2>/dev/null; then
+        mkdir -p "/mnt/$dev/tce/optional" 2>/dev/null
+        TCEDIR=/mnt/$dev/tce
+    else
+        say "tc32-s6d: could not mount /dev/$dev for tce="
+    fi
+fi
+ln -sfn "$TCEDIR" /etc/sysconfig/tcedir
+if [ -f "$TCEDIR/onboot.lst" ]; then
+    while read -r e; do [ -n "$e" ] && tce-load -i "$TCEDIR/optional/$e"; done < "$TCEDIR/onboot.lst"
+fi
+[ -x /opt/bootlocal.sh ] && /opt/bootlocal.sh
+say "tc32-s6d: ready."
